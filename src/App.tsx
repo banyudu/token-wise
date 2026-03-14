@@ -575,18 +575,22 @@ function App() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const sessions = useMemo(() => filterByDateRange(allSessions, dateRange), [allSessions, dateRange]);
+  const pricedSessions = useMemo(() => {
+    const p = MODEL_PRICING[model];
+    return sessions.map((s) => ({ ...s, estimated_cost_usd: calcSessionCost(s, p) }));
+  }, [sessions, model]);
   const overview = useMemo(() => computeOverview(sessions, model), [sessions, model]);
 
   if (loading) return <main className="container"><div className="loading">Loading session data...</div></main>;
   if (error) return <main className="container"><div className="error">Error: {error}</div></main>;
 
-  if (sessionDetail) {
+  if (detailLoading || sessionDetail) {
     return (
       <main className="app">
         <header className="app-header">
           <div className="header-top"><div><h1>Token Wise</h1><p className="app-subtitle">AI Coding Agent Cost Analyzer</p></div></div>
         </header>
-        {detailLoading ? <div className="loading">Loading session detail...</div> : <SessionDetailView detail={sessionDetail} onBack={() => setSessionDetail(null)} />}
+        {detailLoading ? <div className="loading">Loading session detail...</div> : sessionDetail ? <SessionDetailView detail={sessionDetail} onBack={() => setSessionDetail(null)} /> : null}
       </main>
     );
   }
@@ -627,7 +631,7 @@ function App() {
             <SessionsTable sessions={overview.top_sessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter="" onFilterChange={() => {}} onSelectSession={loadSessionDetail} />
           </div>
         </>)}
-        {tab === "sessions" && <SessionsTable sessions={sessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter={filter} onFilterChange={setFilter} onSelectSession={loadSessionDetail} />}
+        {tab === "sessions" && <SessionsTable sessions={pricedSessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter={filter} onFilterChange={setFilter} onSelectSession={loadSessionDetail} />}
         {tab === "projects" && <ProjectsTable projects={overview.project_summaries} />}
       </div>
     </main>
