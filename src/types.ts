@@ -79,3 +79,10 @@ export interface SessionDetail {
   summary: SessionSummary;
   turns: TurnMetrics[];
 }
+
+export interface PricingInfo {
+  input_per_mtok: number;
+  cache_write_per_mtok: number;
+  cache_read_per_mtok: number;
+  output_per_mtok: number;
+}

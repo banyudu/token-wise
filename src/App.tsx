@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics } from "./types";
+
 import "./App.css";
 
 type Tab = "overview" | "sessions" | "projects";
 type SortField = "cost" | "date" | "tokens" | "cache_hit" | "messages" | "duration";
 type SortDir = "asc" | "desc";
 type DateRange = "7d" | "30d" | "90d" | "all";
+type ModelId = "opus" | "sonnet" | "haiku";
+
+const MODEL_PRICING: Record<ModelId, { label: string; input: number; output: number; cacheWrite: number; cacheRead: number }> = {
+  opus:   { label: "Opus 4",   input: 15.0,  output: 75.0,  cacheWrite: 18.75, cacheRead: 1.50 },
+  sonnet: { label: "Sonnet 4", input: 3.0,   output: 15.0,  cacheWrite: 3.75,  cacheRead: 0.30 },
+  haiku:  { label: "Haiku 3.5",  input: 0.80,  output: 4.0,   cacheWrite: 1.0,   cacheRead: 0.08 },
+};
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -59,25 +67,32 @@ function filterByDateRange(sessions: SessionSummary[], range: DateRange): Sessio
   return sessions.filter((s) => (s.first_timestamp ?? "") >= cutoffStr);
 }
 
-function computeOverview(sessions: SessionSummary[]): OverviewMetrics {
+function calcSessionCost(s: SessionSummary, p: typeof MODEL_PRICING[ModelId]): number {
+  return (s.total_input_tokens / 1e6) * p.input + (s.total_output_tokens / 1e6) * p.output +
+    (s.total_cache_write_tokens / 1e6) * p.cacheWrite + (s.total_cache_read_tokens / 1e6) * p.cacheRead;
+}
+
+function computeOverview(sessions: SessionSummary[], model: ModelId = "sonnet"): OverviewMetrics {
+  const p = MODEL_PRICING[model];
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0, totalCost = 0;
   const projectMap = new Map<string, SessionSummary[]>();
   const dailyMap = new Map<string, { cost: number; input: number; output: number; cw: number; cr: number; source: string }>();
   let systemOverhead = 0;
 
   for (const s of sessions) {
+    const sessionCost = calcSessionCost(s, p);
     totalInput += s.total_input_tokens;
     totalOutput += s.total_output_tokens;
     totalCacheWrite += s.total_cache_write_tokens;
     totalCacheRead += s.total_cache_read_tokens;
-    totalCost += s.estimated_cost_usd;
+    totalCost += sessionCost;
     const key = s.project || "unknown";
     if (!projectMap.has(key)) projectMap.set(key, []);
     projectMap.get(key)!.push(s);
     if (s.first_timestamp) {
       const date = s.first_timestamp.slice(0, 10);
       const d = dailyMap.get(date) ?? { cost: 0, input: 0, output: 0, cw: 0, cr: 0, source: s.source };
-      d.cost += s.estimated_cost_usd;
+      d.cost += sessionCost;
       d.input += s.total_input_tokens;
       d.output += s.total_output_tokens;
       d.cw += s.total_cache_write_tokens;
@@ -90,17 +105,17 @@ function computeOverview(sessions: SessionSummary[]): OverviewMetrics {
   }
 
   const totalCtx = totalCacheRead + totalCacheWrite + totalInput;
-  const inputCost = (totalInput / 1e6) * 5.0;
-  const outputCost = (totalOutput / 1e6) * 25.0;
-  const cwCost = (totalCacheWrite / 1e6) * 6.25;
-  const crCost = (totalCacheRead / 1e6) * 0.5;
+  const inputCost = (totalInput / 1e6) * p.input;
+  const outputCost = (totalOutput / 1e6) * p.output;
+  const cwCost = (totalCacheWrite / 1e6) * p.cacheWrite;
+  const crCost = (totalCacheRead / 1e6) * p.cacheRead;
 
   const projectSummaries: ProjectSummary[] = Array.from(projectMap.entries()).map(([proj, sess]) => {
     const pi = sess.reduce((a, s) => a + s.total_input_tokens, 0);
     const po = sess.reduce((a, s) => a + s.total_output_tokens, 0);
     const pcw = sess.reduce((a, s) => a + s.total_cache_write_tokens, 0);
     const pcr = sess.reduce((a, s) => a + s.total_cache_read_tokens, 0);
-    const pc = sess.reduce((a, s) => a + s.estimated_cost_usd, 0);
+    const pc = (pi / 1e6) * p.input + (po / 1e6) * p.output + (pcw / 1e6) * p.cacheWrite + (pcr / 1e6) * p.cacheRead;
     const ptc = pcr + pcw + pi;
     return { project: proj, session_count: sess.length, total_cost_usd: pc, total_input_tokens: pi, total_output_tokens: po, total_cache_write_tokens: pcw, total_cache_read_tokens: pcr, avg_cache_hit_rate: ptc > 0 ? pcr / ptc : 0 };
   }).sort((a, b) => b.total_cost_usd - a.total_cost_usd);
@@ -109,7 +124,10 @@ function computeOverview(sessions: SessionSummary[]): OverviewMetrics {
     date, cost_usd: d.cost, input_tokens: d.input, output_tokens: d.output, cache_write_tokens: d.cw, cache_read_tokens: d.cr, source: d.source,
   })).sort((a, b) => a.date.localeCompare(b.date));
 
-  const topSessions = [...sessions].sort((a, b) => b.estimated_cost_usd - a.estimated_cost_usd).slice(0, 20);
+  const topSessions = [...sessions]
+    .map((s) => ({ ...s, estimated_cost_usd: calcSessionCost(s, p) }))
+    .sort((a, b) => b.estimated_cost_usd - a.estimated_cost_usd)
+    .slice(0, 20);
 
   return {
     total_sessions: sessions.length, total_cost_usd: totalCost, total_input_tokens: totalInput, total_output_tokens: totalOutput,
@@ -128,6 +146,16 @@ function DateRangeSelector({ value, onChange }: { value: DateRange; onChange: (v
     <div className="date-range-selector">
       {options.map((o) => (
         <button key={o.value} className={value === o.value ? "active" : ""} onClick={() => onChange(o.value)}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function ModelSelector({ value, onChange }: { value: ModelId; onChange: (v: ModelId) => void }) {
+  return (
+    <div className="model-selector">
+      {(Object.entries(MODEL_PRICING) as [ModelId, typeof MODEL_PRICING[ModelId]][]).map(([id, p]) => (
+        <button key={id} className={value === id ? "active" : ""} onClick={() => onChange(id)}>{p.label}</button>
       ))}
     </div>
   );
@@ -171,7 +199,7 @@ function CostBar({ breakdown }: { breakdown: OverviewMetrics["cost_breakdown"] }
   );
 }
 
-function DailyCostChart({ dailyCosts }: { dailyCosts: OverviewMetrics["daily_costs"] }) {
+function DailyCostChart({ dailyCosts, pricing }: { dailyCosts: OverviewMetrics["daily_costs"]; pricing: { input: number; output: number; cacheWrite: number; cacheRead: number } }) {
   if (dailyCosts.length === 0) return null;
   const maxCost = Math.max(...dailyCosts.map((d) => d.cost_usd), 0.01);
   return (
@@ -179,7 +207,7 @@ function DailyCostChart({ dailyCosts }: { dailyCosts: OverviewMetrics["daily_cos
       <h3>Daily Cost ({dailyCosts.length} days)</h3>
       <div className="daily-chart">
         {dailyCosts.map((d) => {
-          const bd = { input: (d.input_tokens / 1e6) * 5.0, output: (d.output_tokens / 1e6) * 25.0, cache_write: (d.cache_write_tokens / 1e6) * 6.25, cache_read: (d.cache_read_tokens / 1e6) * 0.5 };
+          const bd = { input: (d.input_tokens / 1e6) * pricing.input, output: (d.output_tokens / 1e6) * pricing.output, cache_write: (d.cache_write_tokens / 1e6) * pricing.cacheWrite, cache_read: (d.cache_read_tokens / 1e6) * pricing.cacheRead };
           const barTotal = bd.input + bd.output + bd.cache_write + bd.cache_read;
           const heightPct = (d.cost_usd / maxCost) * 100;
           return (
@@ -264,11 +292,11 @@ function Recommendations({ sessions, overview }: { sessions: SessionSummary[]; o
   );
 }
 
-function ContextComposition({ overview }: { overview: OverviewMetrics }) {
+function ContextComposition({ overview, cacheWriteRate }: { overview: OverviewMetrics; cacheWriteRate: number }) {
   const totalContext = overview.total_input_tokens + overview.total_cache_write_tokens + overview.total_cache_read_tokens;
   if (totalContext === 0) return null;
   const overhead = overview.estimated_system_overhead_tokens;
-  const overheadCost = (overhead / 1_000_000) * 6.25 * overview.total_sessions;
+  const overheadCost = (overhead / 1_000_000) * cacheWriteRate * overview.total_sessions;
   return (
     <div className="context-section">
       <h3>Context Composition</h3>
@@ -516,6 +544,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>("30d");
+  const [model, setModel] = useState<ModelId>("sonnet");
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [sortField, setSortField] = useState<SortField>("date");
@@ -546,7 +575,7 @@ function App() {
   useEffect(() => { loadData(); }, [loadData]);
 
   const sessions = useMemo(() => filterByDateRange(allSessions, dateRange), [allSessions, dateRange]);
-  const overview = useMemo(() => computeOverview(sessions), [sessions]);
+  const overview = useMemo(() => computeOverview(sessions, model), [sessions, model]);
 
   if (loading) return <main className="container"><div className="loading">Loading session data...</div></main>;
   if (error) return <main className="container"><div className="error">Error: {error}</div></main>;
@@ -568,6 +597,7 @@ function App() {
         <div className="header-top">
           <div><h1>Token Wise</h1><p className="app-subtitle">AI Coding Agent Cost Analyzer</p></div>
           <div className="header-controls">
+            <ModelSelector value={model} onChange={setModel} />
             <DateRangeSelector value={dateRange} onChange={setDateRange} />
             <button className="refresh-btn" onClick={loadData} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
           </div>
@@ -586,11 +616,11 @@ function App() {
             <MetricCard label="Cache Hit Rate" value={formatPercent(overview.avg_cache_hit_rate)} sub="higher is better" />
             <MetricCard label="System Overhead" value={formatTokens(overview.estimated_system_overhead_tokens)} sub="per session (est.)" />
             <MetricCard label="Output Tokens" value={formatTokens(overview.total_output_tokens)} />
-            <MetricCard label="Cache Write Tokens" value={formatTokens(overview.total_cache_write_tokens)} sub="$6.25/MTok" />
+            <MetricCard label="Cache Write Tokens" value={formatTokens(overview.total_cache_write_tokens)} sub={`$${MODEL_PRICING[model].cacheWrite}/MTok`} />
           </div>
           <CostBar breakdown={overview.cost_breakdown} />
-          <ContextComposition overview={overview} />
-          <DailyCostChart dailyCosts={overview.daily_costs} />
+          <ContextComposition overview={overview} cacheWriteRate={MODEL_PRICING[model].cacheWrite} />
+          <DailyCostChart dailyCosts={overview.daily_costs} pricing={MODEL_PRICING[model]} />
           <Recommendations sessions={sessions} overview={overview} />
           <div className="section">
             <h3>Top Sessions by Cost</h3>
