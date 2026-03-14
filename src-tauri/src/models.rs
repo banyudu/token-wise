@@ -129,6 +129,41 @@ impl Default for PricingInfo {
 }
 
 impl PricingInfo {
+    pub fn from_claude_pricing_file() -> Self {
+        let path = match dirs::home_dir() {
+            Some(h) => h.join(".claude").join("readout-pricing.json"),
+            None => return Self::default(),
+        };
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => return Self::default(),
+        };
+        let json: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => return Self::default(),
+        };
+        // The pricing file may have per-model entries. Look for opus pricing first,
+        // then fall back to any available model, then defaults.
+        let models = ["claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-4-5-20250514"];
+        for model in models {
+            if let Some(entry) = json.get(model) {
+                let input = entry.get("inputPerMillion").and_then(|v| v.as_f64());
+                let output = entry.get("outputPerMillion").and_then(|v| v.as_f64());
+                let cache_write = entry.get("cacheWritePerMillion").and_then(|v| v.as_f64());
+                let cache_read = entry.get("cacheReadPerMillion").and_then(|v| v.as_f64());
+                if input.is_some() || output.is_some() {
+                    return Self {
+                        input_per_mtok: input.unwrap_or(5.0),
+                        cache_write_per_mtok: cache_write.unwrap_or(6.25),
+                        cache_read_per_mtok: cache_read.unwrap_or(0.50),
+                        output_per_mtok: output.unwrap_or(25.0),
+                    };
+                }
+            }
+        }
+        Self::default()
+    }
+
     pub fn calculate_cost(
         &self,
         input: u64,

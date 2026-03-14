@@ -5,7 +5,7 @@ use models::{OverviewMetrics, PricingInfo, SessionSummary};
 
 #[tauri::command]
 fn get_overview() -> OverviewMetrics {
-    let pricing = PricingInfo::default();
+    let pricing = PricingInfo::from_claude_pricing_file();
     let mut sessions = parser::load_claude_sessions(&pricing);
     sessions.extend(parser::load_codex_sessions(&pricing));
     parser::build_overview(&sessions, &pricing)
@@ -13,7 +13,7 @@ fn get_overview() -> OverviewMetrics {
 
 #[tauri::command]
 fn get_sessions() -> Vec<SessionSummary> {
-    let pricing = PricingInfo::default();
+    let pricing = PricingInfo::from_claude_pricing_file();
     let mut sessions = parser::load_claude_sessions(&pricing);
     sessions.extend(parser::load_codex_sessions(&pricing));
     sessions

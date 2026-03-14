@@ -188,6 +188,48 @@
   flex-shrink: 0;
 }
 
+/* Context Composition */
+.context-section {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+
+.context-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.context-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.context-item {
+  text-align: center;
+}
+
+.context-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.context-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+}
+
+.context-sub {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
+
 /* Daily Chart */
 .daily-chart-section {
   background: var(--color-bg);
@@ -219,12 +261,18 @@
   justify-content: flex-end;
 }
 
-.daily-bar {
+.daily-bar-stack {
   width: 100%;
-  background: var(--color-primary);
+  display: flex;
+  flex-direction: column;
   border-radius: 2px 2px 0 0;
+  overflow: hidden;
   min-height: 1px;
-  transition: height 0.3s;
+}
+
+.stack-segment {
+  width: 100%;
+  min-height: 0;
 }
 
 .daily-label {
@@ -235,6 +283,37 @@
   text-orientation: mixed;
   height: 36px;
   overflow: hidden;
+}
+
+/* Filter Bar */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.filter-input {
+  flex: 1;
+  max-width: 400px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: inherit;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.filter-input:focus {
+  border-color: var(--color-primary);
+}
+
+.filter-count {
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }
 
 /* Tables */
@@ -276,6 +355,19 @@ th {
   white-space: nowrap;
 }
 
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+th.sortable:hover {
+  color: var(--color-primary);
+}
+
+th.sort-active {
+  color: var(--color-primary);
+}
+
 td {
   padding: 8px 12px;
   border-top: 1px solid var(--color-border);
@@ -312,4 +404,80 @@ tbody tr:hover {
 .source-badge.codex {
   background: rgba(39, 174, 96, 0.15);
   color: var(--color-cache-read);
+}
+
+/* Recommendations */
+.recommendations-section {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+
+.recommendations-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.recommendations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recommendation {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.recommendation.high {
+  background: rgba(231, 76, 60, 0.08);
+  border-left: 3px solid #e74c3c;
+}
+
+.recommendation.medium {
+  background: rgba(243, 156, 18, 0.08);
+  border-left: 3px solid #f39c12;
+}
+
+.recommendation.low {
+  background: rgba(39, 174, 96, 0.08);
+  border-left: 3px solid #27ae60;
+}
+
+.rec-severity {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.recommendation.high .rec-severity {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+}
+
+.recommendation.medium .rec-severity {
+  background: rgba(243, 156, 18, 0.15);
+  color: #f39c12;
+}
+
+.recommendation.low .rec-severity {
+  background: rgba(39, 174, 96, 0.15);
+  color: #27ae60;
+}
+
+.rec-text {
+  flex: 1;
 }

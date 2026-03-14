@@ -467,6 +467,7 @@ checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
 dependencies = [
  "iana-time-zone",
 <<<<<<< HEAD
+<<<<<<< HEAD
  "num-traits",
  "serde",
 =======
@@ -475,6 +476,10 @@ dependencies = [
  "serde",
  "wasm-bindgen",
 >>>>>>> 24cec8e (feat: analyze Claude Code & Codex session data for cost optimization)
+=======
+ "num-traits",
+ "serde",
+>>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
  "windows-link 0.2.1",
 ]
 
@@ -649,6 +654,7 @@ dependencies = [
 [[package]]
 name = "darling"
 <<<<<<< HEAD
+<<<<<<< HEAD
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25ae13da2f202d56bd7f91c25fba009e7717a1e4a1cc98a76d844b65ae912e9d"
@@ -657,6 +663,11 @@ version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee"
 >>>>>>> 24cec8e (feat: analyze Claude Code & Codex session data for cost optimization)
+=======
+version = "0.20.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f63b86c8a8826a49b8c21f08a2d07338eec8d900540f8630dc76284be802989"
+>>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
 dependencies = [
  "darling_core",
  "darling_macro",
@@ -665,14 +676,18 @@ dependencies = [
 [[package]]
 name = "darling_core"
 <<<<<<< HEAD
+<<<<<<< HEAD
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9865a50f7c335f53564bb694ef660825eb8610e0a53d3e11bf1b0d3df31e03b0"
 dependencies = [
 =======
 version = "0.20.11"
+=======
+version = "0.20.10"
+>>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d00b9596d185e565c2207a0b01f8bd1a135483d02d9b7b0a54b11da8d53412e"
+checksum = "95133861a8032aaea082871032f5815eb9e98cef03fa916ab4500513994df9e5"
 dependencies = [
  "fnv",
 >>>>>>> 24cec8e (feat: analyze Claude Code & Codex session data for cost optimization)
@@ -686,6 +701,7 @@ dependencies = [
 [[package]]
 name = "darling_macro"
 <<<<<<< HEAD
+<<<<<<< HEAD
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac3984ec7bd6cfa798e62b4a642426a5be0e68f9401cfc2a01e3fa9ea2fcdb8d"
@@ -694,6 +710,11 @@ version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc34b93ccb385b40dc71c6fceac4b2ad23662c7eeb248cf10d529b7e055b6ead"
 >>>>>>> 24cec8e (feat: analyze Claude Code & Codex session data for cost optimization)
+=======
+version = "0.20.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d336a2a514f6ccccaa3e09b02d41d35330c07ddf03a62165fcec10bb561c7806"
+>>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
 dependencies = [
  "darling_core",
  "quote",
@@ -703,6 +724,7 @@ dependencies = [
 [[package]]
 name = "deranged"
 <<<<<<< HEAD
+<<<<<<< HEAD
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
@@ -711,8 +733,11 @@ dependencies = [
  "serde_core",
 =======
 version = "0.3.11"
+=======
+version = "0.4.0"
+>>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b42b6fa04a440b495c8b04d0e71b707c585f83cb9cb28cf8cd0d976c315e31b4"
+checksum = "9c9e6a11ca8224451684bc0d7d5a7adbf8f2fd6887261a1cfc3c0432f9d4068e"
 dependencies = [
  "powerfmt",
  "serde",
@@ -4082,6 +4107,7 @@ dependencies = [
 [[package]]
 name = "time"
 <<<<<<< HEAD
+<<<<<<< HEAD
 version = "0.3.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
@@ -4090,6 +4116,11 @@ version = "0.3.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dfd88e563464686c916c7e46e623e520ddc6d79fa6641390f2e3fa86e83e885"
 >>>>>>> 24cec8e (feat: analyze Claude Code & Codex session data for cost optimization)
+=======
+version = "0.3.41"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a7619e19bc266e0f9c5e6686659d394bc57973859340060a69221e57dbc0c40"
+>>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
 dependencies = [
  "deranged",
  "itoa",
@@ -4107,6 +4138,7 @@ dependencies = [
 [[package]]
 name = "time-core"
 <<<<<<< HEAD
+<<<<<<< HEAD
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
@@ -4118,15 +4150,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
 =======
 version = "0.1.2"
+=======
+version = "0.1.4"
+>>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef927ca75afb808a4d64dd374f00a2adf8d0fcff8e7b184af886c3c87ec4a3f3"
+checksum = "c9e9a38711f559d9e3ce1cdb06dd7c5b8ea546bc90052da6d06bb76da74bb07c"
 
 [[package]]
 name = "time-macros"
-version = "0.2.18"
+version = "0.2.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+<<<<<<< HEAD
 checksum = "3f252a68540fde3a3877aeea552b832b40ab9a69e318efd078774a01ddee1ccf"
 >>>>>>> 24cec8e (feat: analyze Claude Code & Codex session data for cost optimization)
+=======
+checksum = "3526739392ec93fd8b359c8e98514cb3e8e021beb4e5f597b00a0221f8ed8a49"
+>>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
 dependencies = [
  "num-conv",
  "time-core",
@@ -4147,8 +4186,11 @@ name = "token-wise"
 version = "0.1.0"
 dependencies = [
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
  "chrono",
+=======
+>>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
  "dirs",
  "glob",
  "rusqlite",
