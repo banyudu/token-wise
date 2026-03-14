@@ -47,6 +47,7 @@ pub struct SessionSummary {
     pub session_id: String,
     pub project: String,
     pub git_branch: Option<String>,
+    pub title: Option<String>,
     pub message_count: u32,
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,

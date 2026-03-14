@@ -418,7 +418,7 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
     let result = sessions;
     if (filter) {
       const q = filter.toLowerCase();
-      result = result.filter((s) => s.project.toLowerCase().includes(q) || (s.git_branch ?? "").toLowerCase().includes(q) || s.source.toLowerCase().includes(q));
+      result = result.filter((s) => s.project.toLowerCase().includes(q) || (s.git_branch ?? "").toLowerCase().includes(q) || s.source.toLowerCase().includes(q) || (s.title ?? "").toLowerCase().includes(q));
     }
     return [...result].sort((a, b) => {
       let cmp = 0;
@@ -484,7 +484,22 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
   );
 }
 
-function ProjectsTable({ projects }: { projects: ProjectSummary[] }) {
+function SourceFilter({ value, onChange, counts }: { value: string; onChange: (v: string) => void; counts: { all: number; claude: number; codex: number } }) {
+  const options = [
+    { label: `All (${counts.all})`, value: "all" },
+    { label: `Claude (${counts.claude})`, value: "claude" },
+    { label: `Codex (${counts.codex})`, value: "codex" },
+  ];
+  return (
+    <div className="source-filter">
+      {options.map((o) => (
+        <button key={o.value} className={value === o.value ? "active" : ""} onClick={() => onChange(o.value)}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary[]; onSelectProject?: (project: string) => void }) {
   const [sortBy, setSortBy] = useState<"cost" | "sessions" | "cache">("cost");
   const sorted = useMemo(() => {
     return [...projects].sort((a, b) => {
@@ -514,7 +529,7 @@ function ProjectsTable({ projects }: { projects: ProjectSummary[] }) {
         </thead>
         <tbody>
           {sorted.map((p) => (
-            <tr key={p.project}>
+            <tr key={p.project} className={onSelectProject ? "clickable-row" : ""} onClick={() => onSelectProject?.(p.project)}>
               <td title={p.project}>{shortenProject(p.project)}</td>
               <td>{p.session_count}</td>
               <td className="cost-cell">{formatCost(p.total_cost_usd)}</td>

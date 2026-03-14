@@ -10,6 +10,7 @@ export interface SessionSummary {
   session_id: string;
   project: string;
   git_branch: string | null;
+  title: string | null;
   message_count: number;
   total_input_tokens: number;
   total_output_tokens: number;

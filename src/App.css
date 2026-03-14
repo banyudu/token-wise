@@ -716,6 +716,69 @@ tbody tr:hover {
   color: var(--color-text);
 }
 
+/* Source Filter */
+.source-filter {
+  display: flex;
+  gap: 2px;
+  background: var(--color-border);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.source-filter button {
+  background: transparent;
+  border: none;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.source-filter button:hover {
+  color: var(--color-primary);
+}
+
+.source-filter button.active {
+  background: var(--color-bg);
+  color: var(--color-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}
+
+/* Active Filter Bar */
+.active-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(74, 144, 217, 0.08);
+  border: 1px solid rgba(74, 144, 217, 0.2);
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.clear-filter-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.clear-filter-btn:hover {
+  color: var(--color-output);
+  border-color: var(--color-output);
+}
+
 /* Savings Potential */
 .savings-section {
   background: var(--color-bg);
