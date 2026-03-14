@@ -625,7 +625,7 @@ function App() {
           <CostBar breakdown={overview.cost_breakdown} />
           <ContextComposition overview={overview} cacheWriteRate={MODEL_PRICING[model].cacheWrite} />
           <DailyCostChart dailyCosts={overview.daily_costs} pricing={MODEL_PRICING[model]} />
-          <Recommendations sessions={sessions} overview={overview} />
+          <Recommendations sessions={pricedSessions} overview={overview} />
           <div className="section">
             <h3>Top Sessions by Cost</h3>
             <SessionsTable sessions={overview.top_sessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter="" onFilterChange={() => {}} onSelectSession={loadSessionDetail} />
