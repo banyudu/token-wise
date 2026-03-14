@@ -292,6 +292,90 @@ function Recommendations({ sessions, overview }: { sessions: SessionSummary[]; o
   );
 }
 
+function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewMetrics; sessions: SessionSummary[]; pricing: typeof MODEL_PRICING[ModelId] }) {
+  const savings = useMemo(() => {
+    const currentCacheRate = overview.avg_cache_hit_rate;
+    const totalContext = overview.total_input_tokens + overview.total_cache_write_tokens + overview.total_cache_read_tokens;
+    if (totalContext === 0 || currentCacheRate >= 0.85) return null;
+
+    const targetRate = Math.min(currentCacheRate + 0.2, 0.85);
+    const currentCacheReadTokens = overview.total_cache_read_tokens;
+    const currentNonCacheTokens = overview.total_input_tokens + overview.total_cache_write_tokens;
+
+    // If cache hit rate improved, more tokens would be cache reads (cheap) instead of cache writes/input (expensive)
+    const targetCacheReadTokens = totalContext * targetRate;
+    const tokenShift = targetCacheReadTokens - currentCacheReadTokens;
+
+    // Shifted tokens come proportionally from input and cache write
+    const inputRatio = currentNonCacheTokens > 0 ? overview.total_input_tokens / currentNonCacheTokens : 0.5;
+    const inputReduction = tokenShift * inputRatio;
+    const cwReduction = tokenShift * (1 - inputRatio);
+
+    const currentCost = overview.cost_breakdown.total_cost;
+    const newInputCost = ((overview.total_input_tokens - inputReduction) / 1e6) * pricing.input;
+    const newCwCost = ((overview.total_cache_write_tokens - cwReduction) / 1e6) * pricing.cacheWrite;
+    const newCrCost = (targetCacheReadTokens / 1e6) * pricing.cacheRead;
+    const newOutputCost = overview.cost_breakdown.output_cost;
+    const projectedCost = newInputCost + newCwCost + newCrCost + newOutputCost;
+    const savedAmount = currentCost - projectedCost;
+
+    // Short session analysis
+    const shortSessions = sessions.filter((s) => s.source === "claude" && s.message_count <= 3);
+    const shortSessionCost = shortSessions.reduce((sum, s) => sum + s.estimated_cost_usd, 0);
+
+    return {
+      currentRate: currentCacheRate,
+      targetRate,
+      currentCost,
+      projectedCost: Math.max(0, projectedCost),
+      savedAmount: Math.max(0, savedAmount),
+      savedPercent: currentCost > 0 ? Math.max(0, savedAmount) / currentCost : 0,
+      shortSessionCount: shortSessions.length,
+      shortSessionCost,
+    };
+  }, [overview, sessions, pricing]);
+
+  if (!savings) return (
+    <div className="savings-section">
+      <h3>Savings Potential</h3>
+      <div className="savings-good">Your cache hit rate is already excellent ({formatPercent(overview.avg_cache_hit_rate)}). Keep it up!</div>
+    </div>
+  );
+
+  return (
+    <div className="savings-section">
+      <h3>Savings Potential</h3>
+      <div className="savings-grid">
+        <div className="savings-card">
+          <div className="savings-comparison">
+            <div className="savings-current">
+              <div className="savings-label">Current</div>
+              <div className="savings-value">{formatCost(savings.currentCost)}</div>
+              <div className="savings-sub">Cache: {formatPercent(savings.currentRate)}</div>
+            </div>
+            <div className="savings-arrow">→</div>
+            <div className="savings-projected">
+              <div className="savings-label">Projected</div>
+              <div className="savings-value">{formatCost(savings.projectedCost)}</div>
+              <div className="savings-sub">Cache: {formatPercent(savings.targetRate)}</div>
+            </div>
+          </div>
+          <div className="savings-amount">
+            Save {formatCost(savings.savedAmount)} ({formatPercent(savings.savedPercent)}) by improving cache hit rate to {formatPercent(savings.targetRate)}
+          </div>
+        </div>
+        {savings.shortSessionCount > 3 && (
+          <div className="savings-card">
+            <div className="savings-value">{savings.shortSessionCount} short sessions</div>
+            <div className="savings-sub">{formatCost(savings.shortSessionCost)} spent on sessions with ≤3 messages</div>
+            <div className="savings-amount">Consolidating these into longer sessions could significantly reduce cache write overhead</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ContextComposition({ overview, cacheWriteRate }: { overview: OverviewMetrics; cacheWriteRate: number }) {
   const totalContext = overview.total_input_tokens + overview.total_cache_write_tokens + overview.total_cache_read_tokens;
   if (totalContext === 0) return null;
@@ -496,7 +580,7 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
         </div>
       </div>
       <div className="metrics-grid">
-        <MetricCard label="Total Cost" value={formatCost(summary.estimated_cost_usd)} />
+        <MetricCard label="Total Cost" value={formatCost(summary.estimated_cost_usd)} sub={(() => { const hours = getSessionDurationMs(summary) / 3_600_000; return hours > 0.01 ? `${formatCost(summary.estimated_cost_usd / hours)}/hr` : undefined; })()} />
         <MetricCard label="Turns" value={turns.length.toString()} sub={`${summary.message_count} messages`} />
         <MetricCard label="Cache Hit Rate" value={formatPercent(summary.cache_hit_rate)} />
         <MetricCard label="System Overhead (est.)" value={formatTokens(firstTurnCacheWrite)} sub="first turn cache write" />
@@ -615,8 +699,8 @@ function App() {
       <div className="content">
         {tab === "overview" && (<>
           <div className="metrics-grid">
-            <MetricCard label="Total Cost" value={formatCost(overview.total_cost_usd)} />
-            <MetricCard label="Sessions" value={overview.total_sessions.toString()} />
+            <MetricCard label="Total Cost" value={formatCost(overview.total_cost_usd)} sub={overview.total_sessions > 0 ? `${formatCost(overview.total_cost_usd / overview.total_sessions)} avg/session` : undefined} />
+            <MetricCard label="Sessions" value={overview.total_sessions.toString()} sub={(() => { const totalMs = pricedSessions.reduce((s, x) => s + getSessionDurationMs(x), 0); return totalMs > 0 ? `${formatDuration(totalMs)} total` : undefined; })()} />
             <MetricCard label="Cache Hit Rate" value={formatPercent(overview.avg_cache_hit_rate)} sub="higher is better" />
             <MetricCard label="System Overhead" value={formatTokens(overview.estimated_system_overhead_tokens)} sub="per session (est.)" />
             <MetricCard label="Output Tokens" value={formatTokens(overview.total_output_tokens)} />
@@ -626,6 +710,7 @@ function App() {
           <ContextComposition overview={overview} cacheWriteRate={MODEL_PRICING[model].cacheWrite} />
           <DailyCostChart dailyCosts={overview.daily_costs} pricing={MODEL_PRICING[model]} />
           <Recommendations sessions={pricedSessions} overview={overview} />
+          <SavingsPotential overview={overview} sessions={pricedSessions} pricing={MODEL_PRICING[model]} />
           <div className="section">
             <h3>Top Sessions by Cost</h3>
             <SessionsTable sessions={overview.top_sessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter="" onFilterChange={() => {}} onSelectSession={loadSessionDetail} />
