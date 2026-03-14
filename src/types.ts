@@ -22,6 +22,8 @@ export interface SessionSummary {
   subagent_count: number;
   subagent_cost_usd: number;
   source: string;
+  ephemeral_5m_tokens: number;
+  ephemeral_1h_tokens: number;
 }
 
 export interface ProjectSummary {
@@ -58,4 +60,22 @@ export interface OverviewMetrics {
   daily_costs: DailyCost[];
   project_summaries: ProjectSummary[];
   top_sessions: SessionSummary[];
+}
+
+export interface TurnMetrics {
+  turn_index: number;
+  role: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_write_tokens: number;
+  cache_read_tokens: number;
+  cumulative_context: number;
+  cache_hit_rate: number;
+  cost_usd: number;
+  timestamp: string | null;
+}
+
+export interface SessionDetail {
+  summary: SessionSummary;
+  turns: TurnMetrics[];
 }
