@@ -59,6 +59,28 @@ pub struct SessionSummary {
     pub subagent_count: u32,
     pub subagent_cost_usd: f64,
     pub source: String,
+    pub ephemeral_5m_tokens: u64,
+    pub ephemeral_1h_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TurnMetrics {
+    pub turn_index: u32,
+    pub role: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cumulative_context: u64,
+    pub cache_hit_rate: f64,
+    pub cost_usd: f64,
+    pub timestamp: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDetail {
+    pub summary: SessionSummary,
+    pub turns: Vec<TurnMetrics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

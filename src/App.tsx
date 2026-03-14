@@ -6,6 +6,7 @@ import "./App.css";
 type Tab = "overview" | "sessions" | "projects";
 type SortField = "cost" | "date" | "tokens" | "cache_hit" | "messages";
 type SortDir = "asc" | "desc";
+type DateRange = "7d" | "30d" | "90d" | "all";
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -30,6 +31,114 @@ function formatDate(ts: string | null): string {
 function shortenProject(path: string): string {
   const parts = path.split("/");
   return parts.length > 2 ? parts.slice(-2).join("/") : path;
+}
+
+function filterByDateRange(sessions: SessionSummary[], range: DateRange): SessionSummary[] {
+  if (range === "all") return sessions;
+  const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString();
+  return sessions.filter((s) => (s.first_timestamp ?? "") >= cutoffStr);
+}
+
+function computeOverview(sessions: SessionSummary[]): OverviewMetrics {
+  let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0, totalCost = 0;
+  const projectMap = new Map<string, SessionSummary[]>();
+  const dailyMap = new Map<string, { cost: number; input: number; output: number; cw: number; cr: number; source: string }>();
+
+  let systemOverhead = 0;
+  for (const s of sessions) {
+    totalInput += s.total_input_tokens;
+    totalOutput += s.total_output_tokens;
+    totalCacheWrite += s.total_cache_write_tokens;
+    totalCacheRead += s.total_cache_read_tokens;
+    totalCost += s.estimated_cost_usd;
+
+    const key = s.project || "unknown";
+    if (!projectMap.has(key)) projectMap.set(key, []);
+    projectMap.get(key)!.push(s);
+
+    if (s.first_timestamp) {
+      const date = s.first_timestamp.slice(0, 10);
+      const d = dailyMap.get(date) ?? { cost: 0, input: 0, output: 0, cw: 0, cr: 0, source: s.source };
+      d.cost += s.estimated_cost_usd;
+      d.input += s.total_input_tokens;
+      d.output += s.total_output_tokens;
+      d.cw += s.total_cache_write_tokens;
+      d.cr += s.total_cache_read_tokens;
+      dailyMap.set(date, d);
+    }
+
+    if (s.source === "claude" && s.total_cache_write_tokens > systemOverhead) {
+      systemOverhead = s.total_cache_write_tokens;
+    }
+  }
+
+  const totalCtx = totalCacheRead + totalCacheWrite + totalInput;
+  const inputCost = (totalInput / 1e6) * 5.0;
+  const outputCost = (totalOutput / 1e6) * 25.0;
+  const cwCost = (totalCacheWrite / 1e6) * 6.25;
+  const crCost = (totalCacheRead / 1e6) * 0.5;
+
+  const projectSummaries = Array.from(projectMap.entries()).map(([proj, sess]) => {
+    const pi = sess.reduce((a, s) => a + s.total_input_tokens, 0);
+    const po = sess.reduce((a, s) => a + s.total_output_tokens, 0);
+    const pcw = sess.reduce((a, s) => a + s.total_cache_write_tokens, 0);
+    const pcr = sess.reduce((a, s) => a + s.total_cache_read_tokens, 0);
+    const pc = sess.reduce((a, s) => a + s.estimated_cost_usd, 0);
+    const ptc = pcr + pcw + pi;
+    return {
+      project: proj,
+      session_count: sess.length,
+      total_cost_usd: pc,
+      total_input_tokens: pi,
+      total_output_tokens: po,
+      total_cache_write_tokens: pcw,
+      total_cache_read_tokens: pcr,
+      avg_cache_hit_rate: ptc > 0 ? pcr / ptc : 0,
+    };
+  }).sort((a, b) => b.total_cost_usd - a.total_cost_usd);
+
+  const dailyCosts = Array.from(dailyMap.entries()).map(([date, d]) => ({
+    date, cost_usd: d.cost, input_tokens: d.input, output_tokens: d.output,
+    cache_write_tokens: d.cw, cache_read_tokens: d.cr, source: d.source,
+  })).sort((a, b) => a.date.localeCompare(b.date));
+
+  const topSessions = [...sessions].sort((a, b) => b.estimated_cost_usd - a.estimated_cost_usd).slice(0, 20);
+
+  return {
+    total_sessions: sessions.length,
+    total_cost_usd: totalCost,
+    total_input_tokens: totalInput,
+    total_output_tokens: totalOutput,
+    total_cache_write_tokens: totalCacheWrite,
+    total_cache_read_tokens: totalCacheRead,
+    avg_cache_hit_rate: totalCtx > 0 ? totalCacheRead / totalCtx : 0,
+    cost_breakdown: { input_cost: inputCost, output_cost: outputCost, cache_write_cost: cwCost, cache_read_cost: crCost, total_cost: inputCost + outputCost + cwCost + crCost },
+    estimated_system_overhead_tokens: systemOverhead,
+    daily_costs: dailyCosts,
+    project_summaries: projectSummaries,
+    top_sessions: topSessions,
+  };
+}
+
+function DateRangeSelector({ value, onChange }: { value: DateRange; onChange: (v: DateRange) => void }) {
+  const options: { label: string; value: DateRange }[] = [
+    { label: "7 Days", value: "7d" },
+    { label: "30 Days", value: "30d" },
+    { label: "90 Days", value: "90d" },
+    { label: "All Time", value: "all" },
+  ];
+  return (
+    <div className="date-range-selector">
+      {options.map((o) => (
+        <button key={o.value} className={value === o.value ? "active" : ""} onClick={() => onChange(o.value)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -418,11 +527,12 @@ function ProjectsTable({ projects }: { projects: ProjectSummary[] }) {
 }
 
 function App() {
-  const [overview, setOverview] = useState<OverviewMetrics | null>(null);
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [rawOverview, setRawOverview] = useState<OverviewMetrics | null>(null);
+  const [allSessions, setAllSessions] = useState<SessionSummary[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange>("30d");
 
   // Session table state
   const [sortField, setSortField] = useState<SortField>("date");
@@ -438,23 +548,29 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [ov, sess] = await Promise.all([
-          invoke<OverviewMetrics>("get_overview"),
-          invoke<SessionSummary[]>("get_sessions"),
-        ]);
-        setOverview(ov);
-        setSessions(sess);
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setLoading(false);
-      }
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [ov, sess] = await Promise.all([
+        invoke<OverviewMetrics>("get_overview"),
+        invoke<SessionSummary[]>("get_sessions"),
+      ]);
+      setRawOverview(ov);
+      setAllSessions(sess);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
     }
-    load();
+  };
+
+  useEffect(() => {
+    loadData();
   }, []);
+
+  const sessions = useMemo(() => filterByDateRange(allSessions, dateRange), [allSessions, dateRange]);
+  const overview = useMemo(() => sessions.length > 0 ? computeOverview(sessions) : rawOverview, [sessions, rawOverview]);
 
   if (loading) {
     return (
@@ -477,8 +593,18 @@ function App() {
   return (
     <main className="app">
       <header className="app-header">
-        <h1>Token Wise</h1>
-        <p className="app-subtitle">AI Coding Agent Cost Analyzer</p>
+        <div className="header-top">
+          <div>
+            <h1>Token Wise</h1>
+            <p className="app-subtitle">AI Coding Agent Cost Analyzer</p>
+          </div>
+          <div className="header-controls">
+            <DateRangeSelector value={dateRange} onChange={setDateRange} />
+            <button className="refresh-btn" onClick={loadData} disabled={loading}>
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+        </div>
       </header>
 
       <nav className="tabs">

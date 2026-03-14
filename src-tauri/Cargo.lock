@@ -468,6 +468,7 @@ dependencies = [
  "iana-time-zone",
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
  "num-traits",
  "serde",
 =======
@@ -480,6 +481,12 @@ dependencies = [
  "num-traits",
  "serde",
 >>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
+=======
+ "js-sys",
+ "num-traits",
+ "serde",
+ "wasm-bindgen",
+>>>>>>> 477c5b4 (feat: add date range filtering, dynamic pricing, and Codex timestamp handling)
  "windows-link 0.2.1",
 ]
 
@@ -4187,10 +4194,14 @@ version = "0.1.0"
 dependencies = [
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
  "chrono",
 =======
 >>>>>>> 1975939 (feat: add cost analysis UI enhancements and dynamic pricing)
+=======
+ "chrono",
+>>>>>>> 477c5b4 (feat: add date range filtering, dynamic pricing, and Codex timestamp handling)
  "dirs",
  "glob",
  "rusqlite",

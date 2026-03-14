@@ -1,4 +1,7 @@
-use crate::models::*;
+use crate::models::{
+    ClaudeMessage, CodexThread, CostBreakdown, DailyCost, OverviewMetrics, PricingInfo,
+    ProjectSummary, SessionDetail, SessionSummary, TurnMetrics,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -46,6 +49,8 @@ fn summarize_session(
     let mut total_output = 0u64;
     let mut total_cache_write = 0u64;
     let mut total_cache_read = 0u64;
+    let mut total_eph_5m = 0u64;
+    let mut total_eph_1h = 0u64;
     let mut msg_count = 0u32;
     let mut first_ts: Option<String> = None;
     let mut last_ts: Option<String> = None;
@@ -58,6 +63,10 @@ fn summarize_session(
             total_output += usage.output_tokens;
             total_cache_write += usage.cache_creation_input_tokens;
             total_cache_read += usage.cache_read_input_tokens;
+            if let Some(ref cd) = usage.cache_creation {
+                total_eph_5m += cd.ephemeral_5m_input_tokens;
+                total_eph_1h += cd.ephemeral_1h_input_tokens;
+            }
         }
         if msg.r#type == "user" || msg.r#type == "assistant" {
             msg_count += 1;
@@ -105,7 +114,85 @@ fn summarize_session(
         subagent_count,
         subagent_cost_usd: subagent_cost,
         source: "claude".to_string(),
+        ephemeral_5m_tokens: total_eph_5m,
+        ephemeral_1h_tokens: total_eph_1h,
     }
+}
+
+pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<SessionDetail> {
+    let projects_dir = get_claude_projects_dir()?;
+    let pattern = format!("{}/**/{}.jsonl", projects_dir.display(), session_id);
+
+    for entry in glob::glob(&pattern).ok()? {
+        let path = match entry {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        if path.to_string_lossy().contains("subagents") {
+            continue;
+        }
+
+        let messages = parse_jsonl_file(&path);
+        if messages.is_empty() {
+            continue;
+        }
+
+        // Build per-turn metrics
+        let mut turns = Vec::new();
+        let mut turn_index = 0u32;
+        let mut cumulative_context = 0u64;
+
+        for msg in &messages {
+            if let Some(ref usage) = msg.usage {
+                let input = usage.input_tokens;
+                let output = usage.output_tokens;
+                let cw = usage.cache_creation_input_tokens;
+                let cr = usage.cache_read_input_tokens;
+                cumulative_context += input + cw + cr;
+
+                let total_ctx = input + cw + cr;
+                let hit_rate = if total_ctx > 0 { cr as f64 / total_ctx as f64 } else { 0.0 };
+                let cost = pricing.calculate_cost(input, cw, cr, output);
+
+                turns.push(TurnMetrics {
+                    turn_index,
+                    role: msg.r#type.clone(),
+                    input_tokens: input,
+                    output_tokens: output,
+                    cache_write_tokens: cw,
+                    cache_read_tokens: cr,
+                    cumulative_context,
+                    cache_hit_rate: hit_rate,
+                    cost_usd: cost.total_cost,
+                    timestamp: msg.timestamp.clone(),
+                });
+                turn_index += 1;
+            }
+        }
+
+        // Build subagent info
+        let subagent_dir = path.parent().map(|p| p.join(session_id).join("subagents"));
+        let mut subagent_cost = 0.0;
+        let mut subagent_count = 0u32;
+        if let Some(ref sa_dir) = subagent_dir {
+            if sa_dir.exists() {
+                let sa_pattern = format!("{}/*.jsonl", sa_dir.display());
+                for sa_entry in glob::glob(&sa_pattern).unwrap_or_else(|_| glob::glob("").unwrap()) {
+                    if let Ok(sa_path) = sa_entry {
+                        let sa_messages = parse_jsonl_file(&sa_path);
+                        let sa_summary = summarize_session("", &sa_messages, pricing, 0.0, 0);
+                        subagent_cost += sa_summary.estimated_cost_usd;
+                        subagent_count += 1;
+                    }
+                }
+            }
+        }
+
+        let summary = summarize_session(session_id, &messages, pricing, subagent_cost, subagent_count);
+        return Some(SessionDetail { summary, turns });
+    }
+
+    None
 }
 
 pub fn load_claude_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
@@ -214,13 +301,19 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
 
     let rows = stmt
         .query_map([], |row| {
+            let created_at_unix: Option<i64> = row.get(5)?;
+            let created_at = created_at_unix.map(|ts| {
+                chrono::DateTime::from_timestamp(ts, 0)
+                    .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+                    .unwrap_or_default()
+            });
             Ok(CodexThread {
                 id: row.get(0)?,
                 tokens_used: row.get(1)?,
                 model_provider: row.get(2)?,
                 title: row.get(3)?,
                 cwd: row.get(4)?,
-                created_at: row.get(5)?,
+                created_at,
                 git_branch: row.get(6)?,
             })
         })
@@ -251,6 +344,8 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
                 subagent_count: 0,
                 subagent_cost_usd: 0.0,
                 source: "codex".to_string(),
+                ephemeral_5m_tokens: 0,
+                ephemeral_1h_tokens: 0,
             });
         }
     }
