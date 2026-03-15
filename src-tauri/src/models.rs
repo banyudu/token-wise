@@ -25,13 +25,19 @@ pub struct CacheCreationDetail {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeMessageInner {
+    #[serde(default)]
+    pub usage: Option<TokenUsage>,
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaudeMessage {
     #[serde(default)]
     pub r#type: String,
     #[serde(default)]
-    pub message: Option<serde_json::Value>,
-    #[serde(default)]
-    pub usage: Option<TokenUsage>,
+    pub message: Option<ClaudeMessageInner>,
     #[serde(default)]
     pub timestamp: Option<String>,
     #[serde(default)]

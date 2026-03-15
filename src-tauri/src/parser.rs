@@ -73,7 +73,8 @@ fn summarize_session(
     let mut git_branch: Option<String> = None;
 
     for msg in messages {
-        if let Some(ref usage) = msg.usage {
+        let usage_opt = msg.message.as_ref().and_then(|m| m.usage.as_ref());
+        if let Some(usage) = usage_opt {
             total_input += usage.input_tokens;
             total_output += usage.output_tokens;
             total_cache_write += usage.cache_creation_input_tokens;
@@ -159,7 +160,8 @@ pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<Ses
         let mut cumulative_context = 0u64;
 
         for msg in &messages {
-            if let Some(ref usage) = msg.usage {
+            let usage_opt = msg.message.as_ref().and_then(|m| m.usage.as_ref());
+            if let Some(usage) = usage_opt {
                 let input = usage.input_tokens;
                 let output = usage.output_tokens;
                 let cw = usage.cache_creation_input_tokens;
