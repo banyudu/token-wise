@@ -19,6 +19,21 @@ fn decode_project_name(encoded: &str) -> String {
     encoded.replace("-", "/")
 }
 
+/// Normalize worktree paths to their parent repo path.
+/// e.g. `/Users/dev/project/.worktrees/_9` → `/Users/dev/project`
+/// Also handles `.claude/worktrees/` pattern.
+fn normalize_project_path(path: &str) -> String {
+    // Match /.worktrees/<name> at any position
+    if let Some(idx) = path.find("/.worktrees/") {
+        return path[..idx].to_string();
+    }
+    // Match /.claude/worktrees/<name> at any position
+    if let Some(idx) = path.find("/.claude/worktrees/") {
+        return path[..idx].to_string();
+    }
+    path.to_string()
+}
+
 fn parse_jsonl_file(path: &PathBuf) -> Vec<ClaudeMessage> {
     let file = match fs::File::open(path) {
         Ok(f) => f,
@@ -79,7 +94,7 @@ fn summarize_session(
         }
         if project.is_empty() {
             if let Some(ref cwd) = msg.cwd {
-                project = cwd.clone();
+                project = normalize_project_path(cwd);
             }
         }
         if git_branch.is_none() {
@@ -256,7 +271,7 @@ pub fn load_claude_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
             if let Some(parent) = path.parent() {
                 if let Some(dir_name) = parent.file_name() {
                     let decoded = decode_project_name(&dir_name.to_string_lossy());
-                    summary.project = decoded;
+                    summary.project = normalize_project_path(&decoded);
                 }
             }
         }
@@ -331,7 +346,7 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
 
             sessions.push(SessionSummary {
                 session_id: row.id,
-                project: row.cwd.unwrap_or_default(),
+                project: normalize_project_path(&row.cwd.unwrap_or_default()),
                 git_branch: row.git_branch,
                 title: row.title,
                 message_count: 0,
