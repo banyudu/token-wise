@@ -34,8 +34,8 @@ importers:
         specifier: ^4.6.0
         version: 4.7.0(vite@7.3.1)
       snipe-port:
-        specifier: ^1.0.1
-        version: 1.0.1
+        specifier: ^1.0.2
+        version: 1.0.2
       typescript:
         specifier: ~5.8.3
         version: 5.8.3
@@ -655,8 +655,8 @@ packages:
     resolution: {integrity: sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==}
     hasBin: true
 
-  snipe-port@1.0.1:
-    resolution: {integrity: sha512-KkZz5J1f1JDFQs6B+AXYxd8l1LjXqS3Mx15xA7IraUeudx9P9fbQM8aVg0tDWB2PVSDT/N4rIkTD0yB1MrnL3A==}
+  snipe-port@1.0.2:
+    resolution: {integrity: sha512-1qBxqoql7g9I6LyQye2jF1FNDzfOP90EMcfbIOqWsTQeBrCDUROqO5O+Fi0lUhxrATSd1inL+ImhvmX2vMxwyw==}
     hasBin: true
 
   source-map-js@1.2.1:
@@ -1237,7 +1237,7 @@ snapshots:
 
   semver@6.3.1: {}
 
-  snipe-port@1.0.1: {}
+  snipe-port@1.0.2: {}
 
   source-map-js@1.2.1: {}
 
