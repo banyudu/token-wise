@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics } from "./types";
 
 import "./App.css";
@@ -434,13 +435,23 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
     });
   }, [sessions, filter, sortField, sortDir]);
 
+  const parentRef = useRef<HTMLDivElement>(null);
+  const ROW_HEIGHT = 36;
+
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 20,
+  });
+
   return (
     <div>
       <div className="filter-bar">
         <input type="text" placeholder="Filter by project, branch, or source..." value={filter} onChange={(e) => onFilterChange(e.target.value)} className="filter-input" />
         <span className="filter-count">{filtered.length} sessions</span>
       </div>
-      <div className="table-container">
+      <div className="table-container virtual-table-container" ref={parentRef}>
         <table>
           <thead>
             <tr>
@@ -460,25 +471,40 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
               <SortHeader label="Date" field="date" currentField={sortField} currentDir={sortDir} onSort={onSort} />
             </tr>
           </thead>
-          <tbody>
-            {filtered.map((s) => (
-              <tr key={s.session_id} className={onSelectSession && s.source === "claude" ? "clickable-row" : ""} onClick={() => onSelectSession && s.source === "claude" && onSelectSession(s.session_id)}>
-                <td title={s.project}>{shortenProject(s.project)}</td>
-                <td className="title-cell">{s.title ?? "\u2014"}</td>
-                <td>{s.git_branch ?? "\u2014"}</td>
-                <td>{s.message_count}</td>
-                <td>{formatDuration(getSessionDurationMs(s))}</td>
-                <td className="cost-cell">{formatCost(s.estimated_cost_usd)}</td>
-                <td>{formatPercent(s.cache_hit_rate)}</td>
-                <td>{formatTokens(s.total_input_tokens)}</td>
-                <td>{formatTokens(s.total_output_tokens)}</td>
-                <td>{formatTokens(s.total_cache_write_tokens)}</td>
-                <td>{formatTokens(s.total_cache_read_tokens)}</td>
-                <td>{s.subagent_count > 0 ? `${s.subagent_count} (${formatCost(s.subagent_cost_usd)})` : "\u2014"}</td>
-                <td><span className={`source-badge ${s.source}`}>{s.source}</span></td>
-                <td>{formatDate(s.first_timestamp)}</td>
-              </tr>
-            ))}
+          <tbody style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const s = filtered[virtualRow.index];
+              return (
+                <tr
+                  key={s.session_id}
+                  className={onSelectSession && s.source === "claude" ? "clickable-row" : ""}
+                  onClick={() => onSelectSession && s.source === "claude" && onSelectSession(s.session_id)}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <td title={s.project}>{shortenProject(s.project)}</td>
+                  <td className="title-cell">{s.title ?? "\u2014"}</td>
+                  <td>{s.git_branch ?? "\u2014"}</td>
+                  <td>{s.message_count}</td>
+                  <td>{formatDuration(getSessionDurationMs(s))}</td>
+                  <td className="cost-cell">{formatCost(s.estimated_cost_usd)}</td>
+                  <td>{formatPercent(s.cache_hit_rate)}</td>
+                  <td>{formatTokens(s.total_input_tokens)}</td>
+                  <td>{formatTokens(s.total_output_tokens)}</td>
+                  <td>{formatTokens(s.total_cache_write_tokens)}</td>
+                  <td>{formatTokens(s.total_cache_read_tokens)}</td>
+                  <td>{s.subagent_count > 0 ? `${s.subagent_count} (${formatCost(s.subagent_cost_usd)})` : "\u2014"}</td>
+                  <td><span className={`source-badge ${s.source}`}>{s.source}</span></td>
+                  <td>{formatDate(s.first_timestamp)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

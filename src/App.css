@@ -404,6 +404,34 @@
   overflow-x: auto;
 }
 
+.virtual-table-container {
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+}
+
+.virtual-table-container thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-bg);
+}
+
+.virtual-table-container tbody {
+  display: block;
+}
+
+.virtual-table-container tbody tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.virtual-table-container thead tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
