@@ -2,10 +2,25 @@ use crate::models::{
     ClaudeMessage, CodexThread, CodexTokenUsage, DailyCost, OverviewMetrics, PricingInfo,
     ProjectSummary, SessionDetail, SessionSummary, TurnMetrics,
 };
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+struct CachedSessions {
+    file_count: usize,
+    sessions: Vec<SessionSummary>,
+}
+
+static SESSION_CACHE: Mutex<Option<CachedSessions>> = Mutex::new(None);
+
+static PRICING_CACHE: std::sync::OnceLock<PricingInfo> = std::sync::OnceLock::new();
+
+pub fn get_cached_pricing() -> &'static PricingInfo {
+    PRICING_CACHE.get_or_init(PricingInfo::from_claude_pricing_file)
+}
 
 fn get_claude_projects_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude").join("projects"))
@@ -251,7 +266,22 @@ pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<Ses
     None
 }
 
+fn count_jsonl_files(projects_dir: &PathBuf) -> usize {
+    let pattern = format!("{}/**/*.jsonl", projects_dir.display());
+    glob::glob(&pattern)
+        .map(|paths| paths.filter(|e| e.is_ok()).count())
+        .unwrap_or(0)
+}
+
 pub fn load_claude_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
+    load_claude_sessions_inner(pricing, false)
+}
+
+pub fn load_claude_sessions_force(pricing: &PricingInfo) -> Vec<SessionSummary> {
+    load_claude_sessions_inner(pricing, true)
+}
+
+fn load_claude_sessions_inner(pricing: &PricingInfo, force: bool) -> Vec<SessionSummary> {
     let projects_dir = match get_claude_projects_dir() {
         Some(d) => d,
         None => return vec![],
@@ -261,63 +291,80 @@ pub fn load_claude_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
         return vec![];
     }
 
-    let mut sessions = vec![];
+    let current_count = count_jsonl_files(&projects_dir);
 
-    let pattern = format!("{}/**/*.jsonl", projects_dir.display());
-    for entry in glob::glob(&pattern).unwrap_or_else(|_| glob::glob("").unwrap()) {
-        let path = match entry {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-
-        // Skip subagent files for main session parsing
-        if path.to_string_lossy().contains("subagents") {
-            continue;
+    // Check cache
+    if !force {
+        if let Ok(cache) = SESSION_CACHE.lock() {
+            if let Some(ref cached) = *cache {
+                if cached.file_count == current_count {
+                    return cached.sessions.clone();
+                }
+            }
         }
+    }
 
-        let session_id = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
+    // Collect all main session file paths (skip subagents)
+    let pattern = format!("{}/**/*.jsonl", projects_dir.display());
+    let paths: Vec<PathBuf> = glob::glob(&pattern)
+        .unwrap_or_else(|_| glob::glob("").unwrap())
+        .filter_map(|e| e.ok())
+        .filter(|p| !p.to_string_lossy().contains("subagents"))
+        .collect();
 
-        // Parse subagent sessions
-        let subagent_dir = path.parent().map(|p| p.join(&session_id).join("subagents"));
-        let mut subagent_cost = 0.0;
-        let mut subagent_count = 0u32;
+    // Parse in parallel with rayon
+    let mut sessions: Vec<SessionSummary> = paths
+        .par_iter()
+        .filter_map(|path| {
+            let session_id = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
 
-        if let Some(ref sa_dir) = subagent_dir {
-            if sa_dir.exists() {
-                let sa_pattern = format!("{}/*.jsonl", sa_dir.display());
-                for sa_entry in glob::glob(&sa_pattern).unwrap_or_else(|_| glob::glob("").unwrap()) {
-                    if let Ok(sa_path) = sa_entry {
-                        let sa_messages = parse_jsonl_file(&sa_path);
-                        let sa_summary = summarize_session("", &sa_messages, pricing, 0.0, 0);
-                        subagent_cost += sa_summary.estimated_cost_usd;
-                        subagent_count += 1;
+            // Parse main file FIRST — skip subagent I/O if empty
+            let messages = parse_jsonl_file(path);
+            if messages.is_empty() {
+                return None;
+            }
+
+            // Parse subagent sessions only if main file is valid
+            let subagent_dir = path.parent().map(|p| p.join(&session_id).join("subagents"));
+            let mut subagent_cost = 0.0;
+            let mut subagent_count = 0u32;
+
+            if let Some(ref sa_dir) = subagent_dir {
+                if sa_dir.exists() {
+                    let sa_pattern = format!("{}/*.jsonl", sa_dir.display());
+                    for sa_entry in
+                        glob::glob(&sa_pattern).unwrap_or_else(|_| glob::glob("").unwrap())
+                    {
+                        if let Ok(sa_path) = sa_entry {
+                            let sa_messages = parse_jsonl_file(&sa_path);
+                            let sa_summary =
+                                summarize_session("", &sa_messages, pricing, 0.0, 0);
+                            subagent_cost += sa_summary.estimated_cost_usd;
+                            subagent_count += 1;
+                        }
                     }
                 }
             }
-        }
 
-        let messages = parse_jsonl_file(&path);
-        if messages.is_empty() {
-            continue;
-        }
+            let mut summary =
+                summarize_session(&session_id, &messages, pricing, subagent_cost, subagent_count);
 
-        let mut summary = summarize_session(&session_id, &messages, pricing, subagent_cost, subagent_count);
-
-        // Try to get project name from path
-        if summary.project.is_empty() {
-            if let Some(parent) = path.parent() {
-                if let Some(dir_name) = parent.file_name() {
-                    let decoded = decode_project_name(&dir_name.to_string_lossy());
-                    summary.project = normalize_project_path(&decoded);
+            // Try to get project name from path
+            if summary.project.is_empty() {
+                if let Some(parent) = path.parent() {
+                    if let Some(dir_name) = parent.file_name() {
+                        let decoded = decode_project_name(&dir_name.to_string_lossy());
+                        summary.project = normalize_project_path(&decoded);
+                    }
                 }
             }
-        }
 
-        sessions.push(summary);
-    }
+            Some(summary)
+        })
+        .collect();
 
     sessions.sort_by(|a, b| {
         b.last_timestamp
@@ -325,6 +372,14 @@ pub fn load_claude_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
             .unwrap_or("")
             .cmp(&a.last_timestamp.as_deref().unwrap_or(""))
     });
+
+    // Update cache
+    if let Ok(mut cache) = SESSION_CACHE.lock() {
+        *cache = Some(CachedSessions {
+            file_count: current_count,
+            sessions: sessions.clone(),
+        });
+    }
 
     sessions
 }

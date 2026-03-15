@@ -487,7 +487,7 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
         <table className="w-full border-collapse text-[13px]">
           <thead className="border-b border-[var(--color-border)]">
             <tr>
-              <th className={thBase}>Project</th>
+              <th className={`${thBase} min-w-[280px]`}>Project</th>
               <th className={thBase}>Title</th>
               <th className={thBase}>Branch</th>
               <SortHeader label="Messages" field="messages" currentField={sortField} currentDir={sortDir} onSort={onSort} />
@@ -520,7 +520,7 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
                 >
-                  <td className={tdBase} title={s.project}>{shortenProject(s.project)}</td>
+                  <td className={`${tdBase} min-w-[280px] max-w-[400px]`} title={s.project}>{shortenProject(s.project)}</td>
                   <td className={`${tdBase} max-w-[300px]`} title={s.title ?? ""}>{s.title ?? "\u2014"}</td>
                   <td className={`${tdBase} max-w-[200px]`}>{s.git_branch ?? "\u2014"}</td>
                   <td className={tdBase}>{s.message_count}</td>
@@ -588,7 +588,7 @@ function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary
       <table className="w-full border-collapse text-[13px]">
         <thead className="border-b border-[var(--color-border)]">
           <tr>
-            <th className={thBase}>Project</th>
+            <th className={`${thBase} min-w-[280px]`}>Project</th>
             <th className={sortThCls("sessions")} onClick={() => setSortBy("sessions")}>Sessions {sortBy === "sessions" ? "\u2193" : ""}</th>
             <th className={sortThCls("cost")} onClick={() => setSortBy("cost")}>Total Cost {sortBy === "cost" ? "\u2193" : ""}</th>
             <th className={sortThCls("cache")} onClick={() => setSortBy("cache")}>Cache Hit Rate {sortBy === "cache" ? "\u2193" : ""}</th>
@@ -601,7 +601,7 @@ function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary
         <tbody>
           {sorted.map((p) => (
             <tr key={p.project} className={`hover:bg-[rgba(74,144,217,0.05)] ${onSelectProject ? "cursor-pointer hover:bg-[rgba(74,144,217,0.1)]!" : ""}`} onClick={() => onSelectProject?.(p.project)}>
-              <td className={tdBase} title={p.project}>{shortenProject(p.project)}</td>
+              <td className={`${tdBase} min-w-[280px] max-w-[400px]`} title={p.project}>{shortenProject(p.project)}</td>
               <td className={tdBase}>{p.session_count}</td>
               <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(p.total_cost_usd)}</td>
               <td className={tdBase}>{formatPercent(p.avg_cache_hit_rate)}</td>
@@ -819,6 +819,7 @@ function App() {
   const [dateRange, setDateRange] = useState<DateRange>("30d");
   const [model, setModel] = useState<ModelId>("sonnet");
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -836,6 +837,13 @@ function App() {
     try { setAllSessions(await invoke<SessionSummary[]>("get_sessions")); }
     catch (e) { setError(String(e)); }
     finally { setLoading(false); }
+  }, []);
+
+  const refreshData = useCallback(async () => {
+    setRefreshing(true); setError(null);
+    try { setAllSessions(await invoke<SessionSummary[]>("refresh_sessions")); }
+    catch (e) { setError(String(e)); }
+    finally { setRefreshing(false); }
   }, []);
 
   const loadSessionDetail = useCallback(async (sessionId: string) => {
@@ -895,7 +903,7 @@ function App() {
             <SourceFilter value={sourceFilter} onChange={setSourceFilter} counts={sourceCounts} />
             <ModelSelector value={model} onChange={setModel} />
             <DateRangeSelector value={dateRange} onChange={setDateRange} />
-            <button className="bg-[var(--color-primary)] text-white border-none px-4 py-1.5 rounded-md text-xs font-semibold cursor-pointer font-[inherit] transition-opacity duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed" onClick={loadData} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
+            <button className="bg-[var(--color-primary)] text-white border-none px-4 py-1.5 rounded-md text-xs font-semibold cursor-pointer font-[inherit] transition-opacity duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed" onClick={refreshData} disabled={refreshing}>{refreshing ? "Refreshing..." : "Refresh"}</button>
           </div>
         </div>
       </header>
