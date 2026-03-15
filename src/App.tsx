@@ -714,7 +714,7 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
                 : (t.cumulative_context / maxCumulative) * 100;
             const showLabel = (t.turn_index % labelInterval === 0) || t.turn_index === turns.length - 1;
             return (
-              <div key={t.turn_index} className="flex-1 flex flex-col items-center min-w-0" title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)}, cache hit ${formatPercent(t.cache_hit_rate)}`}>
+              <div key={`${mode}-${t.turn_index}`} className="flex-1 flex flex-col items-center min-w-0" title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)}, cache hit ${formatPercent(t.cache_hit_rate)}`}>
                 <div className="w-full h-[160px] flex flex-col justify-end">
                   <div className="w-full flex flex-col rounded-t-sm overflow-hidden" style={{ height: `${Math.max(heightPct, 0.5)}%` }}>
                     {mode === "cost" ? (
