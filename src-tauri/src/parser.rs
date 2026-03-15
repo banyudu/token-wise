@@ -71,6 +71,7 @@ fn summarize_session(
     let mut last_ts: Option<String> = None;
     let mut project = String::new();
     let mut git_branch: Option<String> = None;
+    let mut title: Option<String> = None;
 
     for msg in messages {
         let usage_opt = msg.message.as_ref().and_then(|m| m.usage.as_ref());
@@ -103,6 +104,43 @@ fn summarize_session(
                 git_branch = Some(branch.clone());
             }
         }
+        // Extract title from the first real user message content
+        if title.is_none() && msg.r#type == "user" {
+            if let Some(ref inner) = msg.message {
+                if let Some(ref content) = inner.content {
+                    let text = match content {
+                        serde_json::Value::String(s) => Some(s.clone()),
+                        serde_json::Value::Array(arr) => {
+                            arr.iter().find_map(|item| {
+                                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                    item.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                        }
+                        _ => None,
+                    };
+                    if let Some(t) = text {
+                        // Skip command messages and meta messages
+                        let trimmed = t.trim();
+                        if !trimmed.is_empty()
+                            && !trimmed.starts_with('<')
+                            && !trimmed.starts_with('/')
+                        {
+                            let truncated = if trimmed.chars().count() > 100 {
+                                let end: String = trimmed.chars().take(97).collect();
+                                format!("{}...", end)
+                            } else {
+                                trimmed.to_string()
+                            };
+                            // Replace newlines with spaces for display
+                            title = Some(truncated.replace('\n', " "));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     let total_context = total_cache_read + total_cache_write + total_input;
@@ -118,7 +156,7 @@ fn summarize_session(
         session_id: session_id.to_string(),
         project,
         git_branch,
-        title: None,
+        title,
         message_count: msg_count,
         total_input_tokens: total_input,
         total_output_tokens: total_output,

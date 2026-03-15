@@ -224,20 +224,22 @@ function DailyCostChart({ dailyCosts, pricing }: { dailyCosts: OverviewMetrics["
   return (
     <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4 mb-6">
       <h3 className="text-sm font-semibold mb-3">Daily Cost ({dailyCosts.length} days)</h3>
-      <div className="flex items-end gap-0.5 h-[120px]">
+      <div className="flex gap-0.5">
         {dailyCosts.map((d) => {
           const bd = { input: (d.input_tokens / 1e6) * pricing.input, output: (d.output_tokens / 1e6) * pricing.output, cache_write: (d.cache_write_tokens / 1e6) * pricing.cacheWrite, cache_read: (d.cache_read_tokens / 1e6) * pricing.cacheRead };
           const barTotal = bd.input + bd.output + bd.cache_write + bd.cache_read;
           const heightPct = (d.cost_usd / maxCost) * 100;
           return (
-            <div key={d.date} className="flex-1 flex flex-col items-center h-full justify-end" title={`${d.date}: ${formatCost(d.cost_usd)}`}>
-              <div className="w-full flex flex-col rounded-t-sm overflow-hidden min-h-px" style={{ height: `${heightPct}%` }}>
-                {barTotal > 0 ? (<>
-                  <div className="w-full" style={{ flex: bd.output, backgroundColor: "var(--color-output)" }} />
-                  <div className="w-full" style={{ flex: bd.cache_write, backgroundColor: "var(--color-cache-write)" }} />
-                  <div className="w-full" style={{ flex: bd.input, backgroundColor: "var(--color-input)" }} />
-                  <div className="w-full" style={{ flex: bd.cache_read, backgroundColor: "var(--color-cache-read)" }} />
-                </>) : <div className="w-full" style={{ flex: 1, backgroundColor: "var(--color-primary)" }} />}
+            <div key={d.date} className="flex-1 flex flex-col items-center" title={`${d.date}: ${formatCost(d.cost_usd)}`}>
+              <div className="w-full h-[120px] flex flex-col justify-end">
+                <div className="w-full flex flex-col rounded-t-sm overflow-hidden min-h-px" style={{ height: `${heightPct}%` }}>
+                  {barTotal > 0 ? (<>
+                    <div className="w-full" style={{ flex: bd.output, backgroundColor: "var(--color-output)" }} />
+                    <div className="w-full" style={{ flex: bd.cache_write, backgroundColor: "var(--color-cache-write)" }} />
+                    <div className="w-full" style={{ flex: bd.input, backgroundColor: "var(--color-input)" }} />
+                    <div className="w-full" style={{ flex: bd.cache_read, backgroundColor: "var(--color-cache-read)" }} />
+                  </>) : <div className="w-full" style={{ flex: 1, backgroundColor: "var(--color-primary)" }} />}
+                </div>
               </div>
               <div className="text-[9px] text-[var(--color-muted)] mt-1 [writing-mode:vertical-rl] [text-orientation:mixed] h-9 overflow-hidden">{d.date.slice(5)}</div>
             </div>
@@ -519,8 +521,8 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
                   }}
                 >
                   <td className={tdBase} title={s.project}>{shortenProject(s.project)}</td>
-                  <td className={`${tdBase} max-w-[200px]`}>{s.title ?? "\u2014"}</td>
-                  <td className={tdBase}>{s.git_branch ?? "\u2014"}</td>
+                  <td className={`${tdBase} max-w-[300px]`} title={s.title ?? ""}>{s.title ?? "\u2014"}</td>
+                  <td className={`${tdBase} max-w-[200px]`}>{s.git_branch ?? "\u2014"}</td>
                   <td className={tdBase}>{s.message_count}</td>
                   <td className={tdBase}>{formatDuration(getSessionDurationMs(s))}</td>
                   <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(s.estimated_cost_usd)}</td>
@@ -617,24 +619,61 @@ function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary
 
 function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
   if (turns.length === 0) return null;
-  const maxCtx = Math.max(...turns.map((t) => t.cumulative_context), 1);
+  const [mode, setMode] = useState<"per-turn" | "cumulative">("per-turn");
+
+  const perTurnTotals = turns.map((t) => t.input_tokens + t.cache_write_tokens + t.cache_read_tokens);
+  const maxPerTurn = Math.max(...perTurnTotals, 1);
+  const maxCumulative = Math.max(...turns.map((t) => t.cumulative_context), 1);
+
+  // For many turns, show every Nth label
+  const labelInterval = turns.length > 80 ? 10 : turns.length > 40 ? 5 : turns.length > 20 ? 2 : 1;
+
   return (
-    <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4 mb-6 overflow-x-auto">
-      <h3 className="text-sm font-semibold mb-3">Context Growth</h3>
-      <div className="flex items-end gap-0.5 h-[120px] min-w-fit">
+    <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4 mb-6">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold">Context Growth</h3>
+        <div className="flex gap-0.5 rounded-md p-0.5 bg-[var(--color-border)]">
+          <button
+            className={`border-none px-2 py-0.5 text-[11px] font-medium cursor-pointer rounded font-[inherit] transition-all duration-150 ${mode === "per-turn" ? "bg-[var(--color-surface)] text-[var(--color-primary)] shadow-sm" : "bg-transparent text-[var(--color-muted)]"}`}
+            onClick={() => setMode("per-turn")}
+          >
+            Per Turn
+          </button>
+          <button
+            className={`border-none px-2 py-0.5 text-[11px] font-medium cursor-pointer rounded font-[inherit] transition-all duration-150 ${mode === "cumulative" ? "bg-[var(--color-surface)] text-[var(--color-primary)] shadow-sm" : "bg-transparent text-[var(--color-muted)]"}`}
+            onClick={() => setMode("cumulative")}
+          >
+            Cumulative
+          </button>
+        </div>
+      </div>
+      {/* Cumulative line overlay */}
+      {mode === "per-turn" && (
+        <div className="flex items-center gap-1.5 text-[11px] text-[var(--color-muted)] mb-2">
+          <span>Max per turn: {formatTokens(maxPerTurn)}</span>
+          <span className="mx-1">{"\u00b7"}</span>
+          <span>Total cumulative: {formatTokens(maxCumulative)}</span>
+        </div>
+      )}
+      <div className="flex gap-px">
         {turns.map((t) => {
-          const heightPct = (t.cumulative_context / maxCtx) * 100;
-          const total = t.input_tokens + t.cache_write_tokens + t.cache_read_tokens;
+          const perTurnTotal = t.input_tokens + t.cache_write_tokens + t.cache_read_tokens;
+          const heightPct = mode === "per-turn"
+            ? (perTurnTotal / maxPerTurn) * 100
+            : (t.cumulative_context / maxCumulative) * 100;
+          const showLabel = (t.turn_index % labelInterval === 0) || t.turn_index === turns.length - 1;
           return (
-            <div key={t.turn_index} className="flex-[1_0_14px] flex flex-col items-center h-full justify-end" title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)}, cache hit ${formatPercent(t.cache_hit_rate)}`}>
-              <div className="w-full flex flex-col rounded-t-sm overflow-hidden min-h-px" style={{ height: `${heightPct}%` }}>
-                {total > 0 ? (<>
-                  <div className="w-full" style={{ flex: t.cache_write_tokens, backgroundColor: "var(--color-cache-write)" }} />
-                  <div className="w-full" style={{ flex: t.input_tokens, backgroundColor: "var(--color-input)" }} />
-                  <div className="w-full" style={{ flex: t.cache_read_tokens, backgroundColor: "var(--color-cache-read)" }} />
-                </>) : <div className="w-full" style={{ flex: 1, backgroundColor: "var(--color-primary)" }} />}
+            <div key={t.turn_index} className="flex-1 flex flex-col items-center min-w-0" title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)}, cache hit ${formatPercent(t.cache_hit_rate)}`}>
+              <div className="w-full h-[160px] flex flex-col justify-end">
+                <div className="w-full flex flex-col rounded-t-sm overflow-hidden" style={{ height: `${Math.max(heightPct, 0.5)}%` }}>
+                  {perTurnTotal > 0 ? (<>
+                    <div className="w-full" style={{ flex: t.cache_write_tokens, backgroundColor: "var(--color-cache-write)" }} />
+                    <div className="w-full" style={{ flex: t.input_tokens, backgroundColor: "var(--color-input)" }} />
+                    <div className="w-full" style={{ flex: t.cache_read_tokens, backgroundColor: "var(--color-cache-read)" }} />
+                  </>) : <div className="w-full" style={{ flex: 1, backgroundColor: "var(--color-primary)" }} />}
+                </div>
               </div>
-              <div className="text-[9px] text-[var(--color-muted)] mt-1">{t.turn_index + 1}</div>
+              <div className={`text-[9px] mt-1 ${showLabel ? "text-[var(--color-muted)]" : "text-transparent"}`}>{t.turn_index + 1}</div>
             </div>
           );
         })}

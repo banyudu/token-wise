@@ -30,6 +30,8 @@ pub struct ClaudeMessageInner {
     pub usage: Option<TokenUsage>,
     #[serde(default)]
     pub role: Option<String>,
+    #[serde(default)]
+    pub content: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -64,11 +64,11 @@
     display: table;
     width: 100%;
     table-layout: fixed;
-    min-width: 1500px;
+    min-width: 1700px;
   }
 
   .virtual-table-container table {
-    min-width: 1500px;
+    min-width: 1700px;
   }
 
   .virtual-table-container th:first-child,
@@ -82,6 +82,16 @@
 
   .virtual-table-container thead th:first-child {
     z-index: 3;
+  }
+
+  .virtual-table-container th:nth-child(2),
+  .virtual-table-container td:nth-child(2) {
+    width: 280px;
+  }
+
+  .virtual-table-container th:nth-child(3),
+  .virtual-table-container td:nth-child(3) {
+    width: 160px;
   }
 
   .virtual-table-container th:last-child,
