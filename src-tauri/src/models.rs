@@ -224,4 +224,15 @@ pub struct CodexThread {
     pub cwd: Option<String>,
     pub created_at: Option<String>,
     pub git_branch: Option<String>,
+    pub rollout_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CodexTokenUsage {
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+    pub message_count: u32,
+    pub first_timestamp: Option<String>,
+    pub last_timestamp: Option<String>,
 }

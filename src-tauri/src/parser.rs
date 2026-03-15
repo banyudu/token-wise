@@ -1,6 +1,6 @@
 use crate::models::{
-    ClaudeMessage, CodexThread, DailyCost, OverviewMetrics, PricingInfo, ProjectSummary,
-    SessionDetail, SessionSummary, TurnMetrics,
+    ClaudeMessage, CodexThread, CodexTokenUsage, DailyCost, OverviewMetrics, PricingInfo,
+    ProjectSummary, SessionDetail, SessionSummary, TurnMetrics,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -291,6 +291,84 @@ pub fn load_claude_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
     sessions
 }
 
+/// Parse a Codex rollout JSONL file to extract accurate token usage from token_count events.
+fn parse_codex_rollout(path: &str) -> Option<CodexTokenUsage> {
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    let mut usage = CodexTokenUsage::default();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let v: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let timestamp = v.get("timestamp").and_then(|t| t.as_str()).map(|s| s.to_string());
+
+        // Track first/last timestamps
+        if let Some(ref ts) = timestamp {
+            if usage.first_timestamp.is_none() {
+                usage.first_timestamp = Some(ts.clone());
+            }
+            usage.last_timestamp = Some(ts.clone());
+        }
+
+        // Count user messages
+        let event_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if event_type == "user_message" {
+            usage.message_count += 1;
+        }
+
+        // Extract token_count from nested event_msg payload
+        let payload_type = v
+            .get("payload")
+            .and_then(|p| p.get("type"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("");
+        if payload_type != "token_count" {
+            continue;
+        }
+
+        let info = match v.get("payload").and_then(|p| p.get("info")) {
+            Some(i) if !i.is_null() => i,
+            _ => continue,
+        };
+
+        let total_usage = match info.get("total_token_usage") {
+            Some(u) => u,
+            None => continue,
+        };
+
+        // Update with latest cumulative totals
+        usage.input_tokens = total_usage
+            .get("input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(usage.input_tokens);
+        usage.cached_input_tokens = total_usage
+            .get("cached_input_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(usage.cached_input_tokens);
+        usage.output_tokens = total_usage
+            .get("output_tokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(usage.output_tokens);
+    }
+
+    if usage.input_tokens > 0 || usage.output_tokens > 0 {
+        Some(usage)
+    } else {
+        None
+    }
+}
+
 pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
     let codex_dir = match get_codex_dir() {
         Some(d) => d,
@@ -311,7 +389,7 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
     };
 
     let mut stmt = match conn.prepare(
-        "SELECT id, tokens_used, model_provider, title, cwd, created_at, git_branch FROM threads ORDER BY created_at DESC",
+        "SELECT id, tokens_used, model_provider, title, cwd, created_at, git_branch, rollout_path FROM threads ORDER BY created_at DESC",
     ) {
         Ok(s) => s,
         Err(_) => return vec![],
@@ -333,6 +411,7 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
                 cwd: row.get(4)?,
                 created_at,
                 git_branch: row.get(6)?,
+                rollout_path: row.get(7)?,
             })
         })
         .ok();
@@ -340,26 +419,57 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
     let mut sessions = vec![];
     if let Some(rows) = rows {
         for row in rows.flatten() {
-            let tokens = row.tokens_used.unwrap_or(0);
-            // Codex doesn't separate cache tokens — treat all as input+output estimate
-            let estimated_input = (tokens as f64 * 0.7) as u64;
-            let estimated_output = tokens - estimated_input;
-            let cost = pricing.calculate_cost(estimated_input, 0, 0, estimated_output);
+            // Try parsing the rollout JSONL for accurate token data
+            let rollout_usage = row
+                .rollout_path
+                .as_deref()
+                .and_then(parse_codex_rollout);
+
+            let (input_tokens, output_tokens, cache_read_tokens, message_count, first_ts, last_ts) =
+                if let Some(ref usage) = rollout_usage {
+                    // OpenAI's input_tokens INCLUDES cached_input_tokens as a subset,
+                    // but Claude's input_tokens is non-cached only.
+                    // Subtract cached to align with Claude's convention.
+                    let non_cached_input = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
+                    (
+                        non_cached_input,
+                        usage.output_tokens,
+                        usage.cached_input_tokens,
+                        usage.message_count,
+                        usage.first_timestamp.clone().or(row.created_at.clone()),
+                        usage.last_timestamp.clone().or(row.created_at.clone()),
+                    )
+                } else {
+                    // Fallback: estimate from SQLite tokens_used
+                    let tokens = row.tokens_used.unwrap_or(0);
+                    let estimated_input = (tokens as f64 * 0.7) as u64;
+                    let estimated_output = tokens - estimated_input;
+                    (estimated_input, estimated_output, 0u64, 0u32, row.created_at.clone(), row.created_at.clone())
+                };
+
+            let total_context = cache_read_tokens + input_tokens;
+            let cache_hit_rate = if total_context > 0 {
+                cache_read_tokens as f64 / total_context as f64
+            } else {
+                0.0
+            };
+
+            let cost = pricing.calculate_cost(input_tokens, 0, cache_read_tokens, output_tokens);
 
             sessions.push(SessionSummary {
                 session_id: row.id,
                 project: normalize_project_path(&row.cwd.unwrap_or_default()),
                 git_branch: row.git_branch,
                 title: row.title,
-                message_count: 0,
-                total_input_tokens: estimated_input,
-                total_output_tokens: estimated_output,
+                message_count,
+                total_input_tokens: input_tokens,
+                total_output_tokens: output_tokens,
                 total_cache_write_tokens: 0,
-                total_cache_read_tokens: 0,
-                cache_hit_rate: 0.0,
+                total_cache_read_tokens: cache_read_tokens,
+                cache_hit_rate,
                 estimated_cost_usd: cost.total_cost,
-                first_timestamp: row.created_at.clone(),
-                last_timestamp: row.created_at,
+                first_timestamp: first_ts,
+                last_timestamp: last_ts,
                 subagent_count: 0,
                 subagent_cost_usd: 0.0,
                 source: "codex".to_string(),
