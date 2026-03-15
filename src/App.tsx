@@ -445,6 +445,7 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
           <thead>
             <tr>
               <th>Project</th>
+              <th>Title</th>
               <th>Branch</th>
               <SortHeader label="Messages" field="messages" currentField={sortField} currentDir={sortDir} onSort={onSort} />
               <SortHeader label="Duration" field="duration" currentField={sortField} currentDir={sortDir} onSort={onSort} />
@@ -463,6 +464,7 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
             {filtered.map((s) => (
               <tr key={s.session_id} className={onSelectSession && s.source === "claude" ? "clickable-row" : ""} onClick={() => onSelectSession && s.source === "claude" && onSelectSession(s.session_id)}>
                 <td title={s.project}>{shortenProject(s.project)}</td>
+                <td className="title-cell">{s.title ?? "\u2014"}</td>
                 <td>{s.git_branch ?? "\u2014"}</td>
                 <td>{s.message_count}</td>
                 <td>{formatDuration(getSessionDurationMs(s))}</td>
@@ -649,6 +651,8 @@ function App() {
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [filter, setFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [projectFilter, setProjectFilter] = useState<string | null>(null);
 
   const handleSort = (field: SortField) => {
     if (field === sortField) setSortDir(sortDir === "desc" ? "asc" : "desc");
@@ -678,7 +682,20 @@ function App() {
     const p = MODEL_PRICING[model];
     return sessions.map((s) => ({ ...s, estimated_cost_usd: calcSessionCost(s, p) }));
   }, [sessions, model]);
-  const overview = useMemo(() => computeOverview(sessions, model), [sessions, model]);
+  const sourceCounts = useMemo(() => ({
+    all: pricedSessions.length,
+    claude: pricedSessions.filter((s) => s.source === "claude").length,
+    codex: pricedSessions.filter((s) => s.source === "codex").length,
+  }), [pricedSessions]);
+
+  const filteredSessions = useMemo(() => {
+    let result = pricedSessions;
+    if (sourceFilter !== "all") result = result.filter((s) => s.source === sourceFilter);
+    if (projectFilter) result = result.filter((s) => s.project === projectFilter);
+    return result;
+  }, [pricedSessions, sourceFilter, projectFilter]);
+
+  const overview = useMemo(() => computeOverview(filteredSessions, model), [filteredSessions, model]);
 
   if (loading) return <main className="container"><div className="loading">Loading session data...</div></main>;
   if (error) return <main className="container"><div className="error">Error: {error}</div></main>;
@@ -700,6 +717,7 @@ function App() {
         <div className="header-top">
           <div><h1>Token Wise</h1><p className="app-subtitle">AI Coding Agent Cost Analyzer</p></div>
           <div className="header-controls">
+            <SourceFilter value={sourceFilter} onChange={setSourceFilter} counts={sourceCounts} />
             <ModelSelector value={model} onChange={setModel} />
             <DateRangeSelector value={dateRange} onChange={setDateRange} />
             <button className="refresh-btn" onClick={loadData} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
@@ -712,6 +730,12 @@ function App() {
         <button className={tab === "projects" ? "active" : ""} onClick={() => setTab("projects")}>Projects ({overview.project_summaries.length})</button>
       </nav>
       <div className="content">
+        {projectFilter && (
+          <div className="active-filter-bar">
+            <span>Filtered by project: <strong>{shortenProject(projectFilter)}</strong></span>
+            <button className="clear-filter-btn" onClick={() => setProjectFilter(null)}>Clear filter</button>
+          </div>
+        )}
         {tab === "overview" && (<>
           <div className="metrics-grid">
             <MetricCard label="Total Cost" value={formatCost(overview.total_cost_usd)} sub={overview.total_sessions > 0 ? `${formatCost(overview.total_cost_usd / overview.total_sessions)} avg/session` : undefined} />
@@ -731,8 +755,8 @@ function App() {
             <SessionsTable sessions={overview.top_sessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter="" onFilterChange={() => {}} onSelectSession={loadSessionDetail} />
           </div>
         </>)}
-        {tab === "sessions" && <SessionsTable sessions={pricedSessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter={filter} onFilterChange={setFilter} onSelectSession={loadSessionDetail} />}
-        {tab === "projects" && <ProjectsTable projects={overview.project_summaries} />}
+        {tab === "sessions" && <SessionsTable sessions={filteredSessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter={filter} onFilterChange={setFilter} onSelectSession={loadSessionDetail} />}
+        {tab === "projects" && <ProjectsTable projects={overview.project_summaries} onSelectProject={(project) => { setProjectFilter(project); setTab("sessions"); }} />}
       </div>
     </main>
   );
