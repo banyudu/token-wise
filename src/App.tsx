@@ -6,7 +6,7 @@ import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, Tu
 import "./App.css";
 
 type Tab = "overview" | "sessions" | "projects";
-type SortField = "cost" | "date" | "tokens" | "cache_hit" | "messages" | "duration";
+type SortField = "cost" | "date" | "input" | "output" | "cache_write" | "cache_read" | "cache_hit" | "messages" | "duration";
 type SortDir = "asc" | "desc";
 type DateRange = "7d" | "30d" | "90d" | "all";
 type ModelId = "opus" | "sonnet" | "haiku";
@@ -426,7 +426,10 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
       switch (sortField) {
         case "cost": cmp = a.estimated_cost_usd - b.estimated_cost_usd; break;
         case "date": cmp = (a.first_timestamp ?? "").localeCompare(b.first_timestamp ?? ""); break;
-        case "tokens": cmp = a.total_input_tokens + a.total_output_tokens - (b.total_input_tokens + b.total_output_tokens); break;
+        case "input": cmp = a.total_input_tokens - b.total_input_tokens; break;
+        case "output": cmp = a.total_output_tokens - b.total_output_tokens; break;
+        case "cache_write": cmp = a.total_cache_write_tokens - b.total_cache_write_tokens; break;
+        case "cache_read": cmp = a.total_cache_read_tokens - b.total_cache_read_tokens; break;
         case "cache_hit": cmp = a.cache_hit_rate - b.cache_hit_rate; break;
         case "messages": cmp = a.message_count - b.message_count; break;
         case "duration": cmp = getSessionDurationMs(a) - getSessionDurationMs(b); break;
@@ -462,10 +465,10 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
               <SortHeader label="Duration" field="duration" currentField={sortField} currentDir={sortDir} onSort={onSort} />
               <SortHeader label="Cost" field="cost" currentField={sortField} currentDir={sortDir} onSort={onSort} />
               <SortHeader label="Cache Hit" field="cache_hit" currentField={sortField} currentDir={sortDir} onSort={onSort} />
-              <SortHeader label="Input" field="tokens" currentField={sortField} currentDir={sortDir} onSort={onSort} />
-              <th>Output</th>
-              <th>Cache Write</th>
-              <th>Cache Read</th>
+              <SortHeader label="Input" field="input" currentField={sortField} currentDir={sortDir} onSort={onSort} />
+              <SortHeader label="Output" field="output" currentField={sortField} currentDir={sortDir} onSort={onSort} />
+              <SortHeader label="Cache Write" field="cache_write" currentField={sortField} currentDir={sortDir} onSort={onSort} />
+              <SortHeader label="Cache Read" field="cache_read" currentField={sortField} currentDir={sortDir} onSort={onSort} />
               <th>Subagents</th>
               <th>Source</th>
               <SortHeader label="Date" field="date" currentField={sortField} currentDir={sortDir} onSort={onSort} />
