@@ -745,9 +745,18 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
   );
 }
 
+function costColor(cost: number, maxCost: number): string {
+  if (maxCost <= 0) return "var(--color-cache-read)";
+  const ratio = cost / maxCost;
+  if (ratio >= 0.66) return "var(--color-output)";
+  if (ratio >= 0.33) return "#e67e22";
+  return "var(--color-cache-read)";
+}
+
 function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: () => void }) {
   const { summary, turns } = detail;
   const firstTurnCacheWrite = turns.length > 0 ? turns[0].cache_write_tokens : 0;
+  const maxTurnCost = Math.max(...turns.map((t) => t.cost_usd), 0);
   return (
     <div className="max-w-[1200px] mx-auto bg-[var(--color-surface)] rounded-xl p-6 shadow-lg">
       <button className="bg-none border border-[var(--color-border)] px-3.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer text-[var(--color-muted)] font-[inherit] mb-4 transition-all duration-150 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)]" onClick={onBack}>{"\u2190"} Back to Sessions</button>
@@ -777,23 +786,20 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
           <table className="w-full border-collapse text-[13px]">
             <thead className="border-b border-[var(--color-border)]">
               <tr>
-                <th className={thBase}>#</th><th className={thBase}>Role</th><th className={thBase}>Input</th><th className={thBase}>Output</th><th className={thBase}>Cache Write</th><th className={thBase}>Cache Read</th><th className={thBase}>Cache Hit</th><th className={thBase}>Cumulative</th><th className={thBase}>Cost</th><th className={thBase}>Time</th>
+                <th className={thBase}>#</th><th className={thBase}>Input</th><th className={thBase}>Output</th><th className={thBase}>Cache Write</th><th className={thBase}>Cache Read</th><th className={thBase}>Cache Hit</th><th className={thBase}>Cumulative</th><th className={thBase}>Cost</th><th className={thBase}>Time</th>
               </tr>
             </thead>
             <tbody>
               {turns.map((t) => (
                 <tr key={t.turn_index} className={`hover:bg-[rgba(74,144,217,0.05)] ${t.cache_hit_rate < 0.3 ? "bg-[rgba(231,76,60,0.04)]" : ""}`}>
                   <td className={tdBase}>{t.turn_index + 1}</td>
-                  <td className={tdBase}>
-                    <span className={`inline-block px-1.5 py-px rounded text-[11px] font-medium ${t.role === "user" ? "bg-[rgba(74,144,217,0.15)] text-[var(--color-primary)]" : "bg-[rgba(39,174,96,0.15)] text-[var(--color-cache-read)]"}`}>{t.role}</span>
-                  </td>
                   <td className={tdBase}>{formatTokens(t.input_tokens)}</td>
                   <td className={tdBase}>{formatTokens(t.output_tokens)}</td>
                   <td className={tdBase}>{formatTokens(t.cache_write_tokens)}</td>
                   <td className={tdBase}>{formatTokens(t.cache_read_tokens)}</td>
                   <td className={tdBase}>{formatPercent(t.cache_hit_rate)}</td>
                   <td className={tdBase}>{formatTokens(t.cumulative_context)}</td>
-                  <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(t.cost_usd)}</td>
+                  <td className={`${tdBase} font-semibold`} style={{ color: costColor(t.cost_usd, maxTurnCost) }}>{formatCost(t.cost_usd)}</td>
                   <td className={tdBase}>{t.timestamp ? formatDate(t.timestamp) : "\u2014"}</td>
                 </tr>
               ))}
