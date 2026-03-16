@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { motion, AnimatePresence } from "framer-motion";
 import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics } from "./types";
+import { LoadingScreen } from "./LoadingScreen";
 
 import "./App.css";
 
@@ -979,8 +981,8 @@ function App() {
 
   const overview = useMemo(() => computeOverview(filteredSessions, model), [filteredSessions, model]);
 
-  if (loading) return <main className="flex justify-center items-center min-h-screen"><div className="text-base p-10">Loading session data...</div></main>;
-  if (error) return <main className="flex justify-center items-center min-h-screen"><div className="text-base p-10 text-[#e74c3c]">Error: {error}</div></main>;
+  if (loading) return <LoadingScreen message="Loading session data..." />;
+  if (error) return <main className="flex justify-center items-center min-h-screen"><motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-base p-10 text-[#e74c3c]">Error: {error}</motion.div></main>;
 
   if (detailLoading || sessionDetail) {
     return (
@@ -993,34 +995,45 @@ function App() {
           </div>
         </header>
         <main className="max-w-[1400px] mx-auto px-5">
-          {detailLoading ? <div className="text-base p-10">Loading session detail...</div> : sessionDetail ? <SessionDetailView detail={sessionDetail} onBack={() => setSessionDetail(null)} /> : null}
+          {detailLoading ? <LoadingScreen message="Loading session detail..." /> : sessionDetail ? <SessionDetailView detail={sessionDetail} onBack={() => setSessionDetail(null)} /> : null}
         </main>
       </div>
     );
   }
 
   return (
-    <div>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>
       <header className="glass-header mb-6">
         <div className="max-w-[1400px] mx-auto px-5">
           <div className="flex items-center gap-6 py-3">
-            <img src="/icon-horizontal.png" alt="Token Wise" className="h-10" />
+            <motion.img
+              src="/icon-horizontal.png"
+              alt="Token Wise"
+              className="h-10"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+            />
             <nav className="flex gap-1 flex-1 justify-center">
               {([["overview", "Overview"], ["sessions", `Sessions (${overview.total_sessions})`], ["projects", `Projects (${overview.project_summaries.length})`]] as const).map(([t, label]) => (
-                <button
+                <motion.button
                   key={t}
-                  className={`border-none px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-all duration-200 font-[inherit] ${tab === t ? "bg-[var(--color-primary)] text-white shadow-sm" : "bg-transparent text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:bg-[rgba(74,144,217,0.08)]"}`}
+                  className={`relative border-none px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-colors duration-200 font-[inherit] ${tab === t ? "bg-[var(--color-primary)] text-white shadow-sm" : "bg-transparent text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:bg-[rgba(74,144,217,0.08)]"}`}
                   onClick={() => setTab(t)}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                 >
                   {label}
-                </button>
+                </motion.button>
               ))}
             </nav>
-            <button
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[13px] font-medium text-[var(--color-muted)] cursor-pointer transition-all duration-150 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+            <motion.button
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[13px] font-medium text-[var(--color-muted)] cursor-pointer transition-colors duration-150 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={refreshData}
               disabled={refreshing}
               title="Refresh data"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
             >
               <svg className={refreshing ? "refresh-spin" : ""} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
@@ -1029,7 +1042,7 @@ function App() {
                 <polyline points="3 21 3 16 8 16" />
               </svg>
               Refresh
-            </button>
+            </motion.button>
           </div>
           <div className="flex items-center gap-3 pb-3 flex-wrap">
             <SourceFilter value={sourceFilter} onChange={setSourceFilter} counts={sourceCounts} />
@@ -1042,36 +1055,74 @@ function App() {
       </header>
       <main className="max-w-[1400px] mx-auto px-5">
       <div>
-        {projectFilter && (
-          <div className="flex items-center gap-3 px-3 py-2 bg-[rgba(74,144,217,0.08)] border border-[rgba(74,144,217,0.2)] rounded-md mb-4 text-[13px]">
-            <span>Filtered by project: <strong>{shortenProject(projectFilter)}</strong></span>
-            <button className="bg-none border border-[var(--color-border)] px-2.5 py-1 rounded text-xs cursor-pointer text-[var(--color-muted)] font-[inherit] transition-all duration-150 hover:text-[var(--color-output)] hover:border-[var(--color-output)]" onClick={() => setProjectFilter(null)}>Clear filter</button>
-          </div>
-        )}
-        {tab === "overview" && (<>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4 mb-6">
-            <MetricCard label="Total Cost" value={formatCost(overview.total_cost_usd)} sub={overview.total_sessions > 0 ? `${formatCost(overview.total_cost_usd / overview.total_sessions)} avg/session` : undefined} />
-            <MetricCard label="Sessions" value={overview.total_sessions.toString()} sub={(() => { const totalMs = pricedSessions.reduce((s, x) => s + getSessionDurationMs(x), 0); return totalMs > 0 ? `${formatDuration(totalMs)} total` : undefined; })()} />
-            <MetricCard label="Cache Hit Rate" value={formatPercent(overview.avg_cache_hit_rate)} sub="higher is better" />
-            <MetricCard label="System Overhead" value={formatTokens(overview.estimated_system_overhead_tokens)} sub="per session (est.)" />
-            <MetricCard label="Output Tokens" value={formatTokens(overview.total_output_tokens)} />
-            <MetricCard label="Cache Write Tokens" value={formatTokens(overview.total_cache_write_tokens)} sub={`$${getModelPricing(model).cacheWrite}/MTok`} />
-          </div>
-          <CostBar breakdown={overview.cost_breakdown} />
-          <ContextComposition overview={overview} cacheWriteRate={getModelPricing(model).cacheWrite} />
-          <DailyCostChart dailyCosts={overview.daily_costs} pricing={getModelPricing(model)} />
-          <Recommendations sessions={pricedSessions} overview={overview} />
-          <SavingsPotential overview={overview} sessions={pricedSessions} pricing={getModelPricing(model)} />
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold mb-3">Top Sessions by Cost</h3>
-            <SessionsTable sessions={overview.top_sessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter="" onFilterChange={() => {}} onSelectSession={loadSessionDetail} />
-          </div>
-        </>)}
-        {tab === "sessions" && <SessionsTable sessions={filteredSessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter={filter} onFilterChange={setFilter} onSelectSession={loadSessionDetail} />}
-        {tab === "projects" && <ProjectsTable projects={overview.project_summaries} onSelectProject={(project) => { setProjectFilter(project); setTab("sessions"); }} />}
+        <AnimatePresence>
+          {projectFilter && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex items-center gap-3 px-3 py-2 bg-[rgba(74,144,217,0.08)] border border-[rgba(74,144,217,0.2)] rounded-md mb-4 text-[13px] overflow-hidden"
+            >
+              <span>Filtered by project: <strong>{shortenProject(projectFilter)}</strong></span>
+              <button className="bg-none border border-[var(--color-border)] px-2.5 py-1 rounded text-xs cursor-pointer text-[var(--color-muted)] font-[inherit] transition-all duration-150 hover:text-[var(--color-output)] hover:border-[var(--color-output)]" onClick={() => setProjectFilter(null)}>Clear filter</button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+          >
+            {tab === "overview" && (<>
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4 mb-6">
+                {[
+                  { label: "Total Cost", value: formatCost(overview.total_cost_usd), sub: overview.total_sessions > 0 ? `${formatCost(overview.total_cost_usd / overview.total_sessions)} avg/session` : undefined },
+                  { label: "Sessions", value: overview.total_sessions.toString(), sub: (() => { const totalMs = pricedSessions.reduce((s, x) => s + getSessionDurationMs(x), 0); return totalMs > 0 ? `${formatDuration(totalMs)} total` : undefined; })() },
+                  { label: "Cache Hit Rate", value: formatPercent(overview.avg_cache_hit_rate), sub: "higher is better" },
+                  { label: "System Overhead", value: formatTokens(overview.estimated_system_overhead_tokens), sub: "per session (est.)" },
+                  { label: "Output Tokens", value: formatTokens(overview.total_output_tokens) },
+                  { label: "Cache Write Tokens", value: formatTokens(overview.total_cache_write_tokens), sub: `$${getModelPricing(model).cacheWrite}/MTok` },
+                ].map((card, i) => (
+                  <motion.div
+                    key={card.label}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05, duration: 0.3, ease: "easeOut" }}
+                  >
+                    <MetricCard {...card} />
+                  </motion.div>
+                ))}
+              </div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
+                <CostBar breakdown={overview.cost_breakdown} />
+              </motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }}>
+                <ContextComposition overview={overview} cacheWriteRate={getModelPricing(model).cacheWrite} />
+              </motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
+                <DailyCostChart dailyCosts={overview.daily_costs} pricing={getModelPricing(model)} />
+              </motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}>
+                <Recommendations sessions={pricedSessions} overview={overview} />
+              </motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
+                <SavingsPotential overview={overview} sessions={pricedSessions} pricing={getModelPricing(model)} />
+              </motion.div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.45 }} className="mb-6">
+                <h3 className="text-sm font-semibold mb-3">Top Sessions by Cost</h3>
+                <SessionsTable sessions={overview.top_sessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter="" onFilterChange={() => {}} onSelectSession={loadSessionDetail} />
+              </motion.div>
+            </>)}
+            {tab === "sessions" && <SessionsTable sessions={filteredSessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter={filter} onFilterChange={setFilter} onSelectSession={loadSessionDetail} />}
+            {tab === "projects" && <ProjectsTable projects={overview.project_summaries} onSelectProject={(project) => { setProjectFilter(project); setTab("sessions"); }} />}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </main>
-    </div>
+    </motion.div>
   );
 }
 
