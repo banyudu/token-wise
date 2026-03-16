@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "token-wise",
+        "title": "Token Wise",
         "width": 1200,
         "height": 800
       }

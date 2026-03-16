@@ -4,7 +4,7 @@ mod parser;
 use models::{OverviewMetrics, PricingInfo, SessionDetail, SessionSummary};
 
 #[tauri::command]
-fn get_overview() -> OverviewMetrics {
+async fn get_overview() -> OverviewMetrics {
     let pricing = parser::get_cached_pricing();
     let mut sessions = parser::load_claude_sessions(pricing);
     sessions.extend(parser::load_codex_sessions(pricing));
@@ -12,7 +12,7 @@ fn get_overview() -> OverviewMetrics {
 }
 
 #[tauri::command]
-fn get_sessions() -> Vec<SessionSummary> {
+async fn get_sessions() -> Vec<SessionSummary> {
     let pricing = parser::get_cached_pricing();
     let mut sessions = parser::load_claude_sessions(pricing);
     sessions.extend(parser::load_codex_sessions(pricing));
@@ -20,7 +20,7 @@ fn get_sessions() -> Vec<SessionSummary> {
 }
 
 #[tauri::command]
-fn refresh_sessions() -> Vec<SessionSummary> {
+async fn refresh_sessions() -> Vec<SessionSummary> {
     let pricing = parser::get_cached_pricing();
     let mut sessions = parser::load_claude_sessions_force(pricing);
     sessions.extend(parser::load_codex_sessions(pricing));
@@ -28,7 +28,7 @@ fn refresh_sessions() -> Vec<SessionSummary> {
 }
 
 #[tauri::command]
-fn get_session_detail(session_id: String) -> Option<SessionDetail> {
+async fn get_session_detail(session_id: String) -> Option<SessionDetail> {
     let pricing = parser::get_cached_pricing();
     parser::get_session_detail(&session_id, pricing)
 }

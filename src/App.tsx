@@ -8,13 +8,17 @@ import "./App.css";
 type Tab = "overview" | "sessions" | "projects";
 type SortField = "cost" | "date" | "input" | "output" | "cache_write" | "cache_read" | "cache_hit" | "messages" | "duration";
 type SortDir = "asc" | "desc";
-type DateRange = "7d" | "30d" | "90d" | "all";
-type ModelId = "opus" | "sonnet" | "haiku";
+type DateRange = "7d" | "30d" | "90d" | "all" | "custom";
 
-const MODEL_PRICING: Record<ModelId, { label: string; input: number; output: number; cacheWrite: number; cacheRead: number }> = {
-  opus:   { label: "Opus 4",   input: 15.0,  output: 75.0,  cacheWrite: 18.75, cacheRead: 1.50 },
-  sonnet: { label: "Sonnet 4", input: 3.0,   output: 15.0,  cacheWrite: 3.75,  cacheRead: 0.30 },
-  haiku:  { label: "Haiku 3.5",  input: 0.80,  output: 4.0,   cacheWrite: 1.0,   cacheRead: 0.08 },
+type ModelPricing = { label: string; input: number; output: number; cacheWrite: number; cacheRead: number };
+
+const MODEL_PRICING: Record<string, ModelPricing> = {
+  opus:       { label: "Opus 4",     input: 15.0,  output: 75.0,  cacheWrite: 18.75, cacheRead: 1.50 },
+  sonnet:     { label: "Sonnet 4",   input: 3.0,   output: 15.0,  cacheWrite: 3.75,  cacheRead: 0.30 },
+  haiku:      { label: "Haiku 3.5",  input: 0.80,  output: 4.0,   cacheWrite: 1.0,   cacheRead: 0.08 },
+  "gpt-5.4":  { label: "GPT-5.4",   input: 2.50,  output: 10.0,  cacheWrite: 0,     cacheRead: 0 },
+  "gpt-5.2":  { label: "GPT-5.2",   input: 1.25,  output: 5.0,   cacheWrite: 0,     cacheRead: 0 },
+  "gpt-4.1":  { label: "GPT-4.1",   input: 2.0,   output: 8.0,   cacheWrite: 0,     cacheRead: 0 },
 };
 
 function formatTokens(n: number): string {
@@ -59,8 +63,16 @@ function formatDuration(ms: number): string {
   return `${days}d ${hours % 24}h`;
 }
 
-function filterByDateRange(sessions: SessionSummary[], range: DateRange): SessionSummary[] {
+function filterByDateRange(sessions: SessionSummary[], range: DateRange, customFrom?: string, customTo?: string): SessionSummary[] {
   if (range === "all") return sessions;
+  if (range === "custom") {
+    return sessions.filter((s) => {
+      const ts = s.first_timestamp ?? "";
+      if (customFrom && ts < customFrom) return false;
+      if (customTo && ts > new Date(new Date(customTo).getTime() + 86400000).toISOString()) return false;
+      return true;
+    });
+  }
   const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
@@ -68,13 +80,17 @@ function filterByDateRange(sessions: SessionSummary[], range: DateRange): Sessio
   return sessions.filter((s) => (s.first_timestamp ?? "") >= cutoffStr);
 }
 
-function calcSessionCost(s: SessionSummary, p: typeof MODEL_PRICING[ModelId]): number {
+function getModelPricing(model: string): ModelPricing {
+  return MODEL_PRICING[model] ?? MODEL_PRICING.sonnet;
+}
+
+function calcSessionCost(s: SessionSummary, p: ModelPricing): number {
   return (s.total_input_tokens / 1e6) * p.input + (s.total_output_tokens / 1e6) * p.output +
     (s.total_cache_write_tokens / 1e6) * p.cacheWrite + (s.total_cache_read_tokens / 1e6) * p.cacheRead;
 }
 
-function computeOverview(sessions: SessionSummary[], model: ModelId = "sonnet"): OverviewMetrics {
-  const p = MODEL_PRICING[model];
+function computeOverview(sessions: SessionSummary[], model: string = "sonnet"): OverviewMetrics {
+  const p = getModelPricing(model);
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0, totalCost = 0;
   const projectMap = new Map<string, SessionSummary[]>();
   const dailyMap = new Map<string, { cost: number; input: number; output: number; cw: number; cr: number; source: string }>();
@@ -139,44 +155,128 @@ function computeOverview(sessions: SessionSummary[], model: ModelId = "sonnet"):
   };
 }
 
-/* --- Pill button group (shared by DateRange, Model, Source selectors) --- */
+/* --- FilterDropdown: generic reusable dropdown trigger + panel --- */
 
-const pillGroup = "flex gap-0.5 rounded-md p-0.5";
-const pillBtn = "border-none bg-transparent px-2.5 py-1 text-xs font-medium text-[var(--color-muted)] cursor-pointer rounded font-[inherit] transition-all duration-150";
-const pillBtnHover = "hover:text-[var(--color-primary)]";
+function FilterDropdown({ label, value, renderContent, className }: { label: string; value: string; renderContent: (close: () => void) => React.ReactNode; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
-function DateRangeSelector({ value, onChange }: { value: DateRange; onChange: (v: DateRange) => void }) {
-  const options: { label: string; value: DateRange }[] = [
-    { label: "7 Days", value: "7d" }, { label: "30 Days", value: "30d" }, { label: "90 Days", value: "90d" }, { label: "All Time", value: "all" },
-  ];
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
   return (
-    <div className={`${pillGroup} bg-[var(--color-border)]`}>
-      {options.map((o) => (
-        <button
-          key={o.value}
-          className={`${pillBtn} ${pillBtnHover} ${value === o.value ? "bg-[var(--color-surface)] text-[var(--color-primary)] font-semibold shadow-sm" : ""}`}
-          onClick={() => onChange(o.value)}
-        >
-          {o.label}
-        </button>
-      ))}
+    <div ref={ref} className={`relative ${className ?? ""}`}>
+      <button
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[13px] font-medium cursor-pointer transition-all duration-150 hover:border-[var(--color-primary)] min-w-[120px]"
+        onClick={() => setOpen(!open)}
+      >
+        <span className="text-[var(--color-muted)]">{label}:</span>
+        <span className="truncate max-w-[120px]">{value}</span>
+        <span className={`text-[10px] text-[var(--color-muted)] ml-auto transition-transform duration-150 ${open ? "rotate-180" : ""}`}>▾</span>
+      </button>
+      {open && (
+        <div className="filter-dropdown-panel absolute top-full left-0 mt-1 min-w-[200px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] shadow-lg z-50 py-1 max-h-[300px] overflow-y-auto">
+          {renderContent(() => setOpen(false))}
+        </div>
+      )}
     </div>
   );
 }
 
-function ModelSelector({ value, onChange }: { value: ModelId; onChange: (v: ModelId) => void }) {
+function FilterOption({ selected, onClick, label, sub, tooltip }: { selected: boolean; onClick: () => void; label: string; sub?: string; tooltip?: string }) {
   return (
-    <div className={`${pillGroup} bg-[var(--color-border)] border border-[var(--color-border)]`}>
-      {(Object.entries(MODEL_PRICING) as [ModelId, typeof MODEL_PRICING[ModelId]][]).map(([id, p]) => (
-        <button
-          key={id}
-          className={`${pillBtn} ${value === id ? "!bg-[var(--color-primary)] !text-white" : "hover:text-inherit"}`}
-          onClick={() => onChange(id)}
-        >
-          {p.label}
-        </button>
+    <button
+      className={`w-full text-left px-3 py-2 text-[13px] border-none bg-transparent cursor-pointer transition-all duration-100 flex items-center justify-between gap-2 font-[inherit] ${selected ? "text-[var(--color-primary)] font-semibold bg-[rgba(74,144,217,0.08)]" : "text-inherit hover:bg-[rgba(74,144,217,0.05)]"}`}
+      onClick={onClick}
+      title={tooltip}
+    >
+      <span className="flex items-center gap-2">
+        <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${selected ? "border-[var(--color-primary)]" : "border-[var(--color-border)]"}`}>
+          {selected && <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-primary)]" />}
+        </span>
+        {label}
+      </span>
+      {sub && <span className="text-[var(--color-muted)] text-xs">{sub}</span>}
+    </button>
+  );
+}
+
+function DateRangeSelector({ value, onChange, customFrom, customTo, onCustomFromChange, onCustomToChange }: {
+  value: DateRange; onChange: (v: DateRange) => void;
+  customFrom: string; customTo: string;
+  onCustomFromChange: (v: string) => void; onCustomToChange: (v: string) => void;
+}) {
+  const presets: { label: string; value: DateRange }[] = [
+    { label: "7 Days", value: "7d" }, { label: "30 Days", value: "30d" }, { label: "90 Days", value: "90d" }, { label: "All Time", value: "all" },
+  ];
+  const displayValue = value === "custom" && customFrom
+    ? `${new Date(customFrom).toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${customTo ? new Date(customTo).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "now"}`
+    : presets.find((p) => p.value === value)?.label ?? "30 Days";
+
+  return (
+    <FilterDropdown label="Range" value={displayValue} renderContent={(close) => (<>
+      {presets.map((o) => (
+        <FilterOption key={o.value} selected={value === o.value} label={o.label} onClick={() => { onChange(o.value); close(); }} />
       ))}
-    </div>
+      <div className="border-t border-[var(--color-border)] mt-1 pt-1 px-3 pb-2">
+        <div className="text-[11px] text-[var(--color-muted)] font-medium mb-1.5">Custom Range</div>
+        <div className="flex gap-2 items-center">
+          <input type="date" value={customFrom} onChange={(e) => { onCustomFromChange(e.target.value); onChange("custom"); }}
+            className="flex-1 px-2 py-1 text-xs rounded border border-[var(--color-border)] bg-[var(--color-surface)] text-inherit font-[inherit]" />
+          <span className="text-[var(--color-muted)] text-xs">–</span>
+          <input type="date" value={customTo} onChange={(e) => { onCustomToChange(e.target.value); onChange("custom"); }}
+            className="flex-1 px-2 py-1 text-xs rounded border border-[var(--color-border)] bg-[var(--color-surface)] text-inherit font-[inherit]" />
+        </div>
+      </div>
+    </>)} />
+  );
+}
+
+function ModelSelector({ value, onChange, sourceFilter }: { value: string; onChange: (v: string) => void; sourceFilter: string }) {
+  const [search, setSearch] = useState("");
+  const displayValue = value === "all" ? "All" : (MODEL_PRICING[value]?.label ?? value);
+
+  const modelEntries = useMemo(() => {
+    let entries = Object.entries(MODEL_PRICING);
+    if (sourceFilter === "claude") entries = entries.filter(([id]) => !id.startsWith("gpt"));
+    else if (sourceFilter === "codex") entries = entries.filter(([id]) => id.startsWith("gpt"));
+    return entries;
+  }, [sourceFilter]);
+
+  const filteredModels = useMemo(() => {
+    if (!search) return modelEntries;
+    return modelEntries.filter(([, p]) => p.label.toLowerCase().includes(search.toLowerCase()));
+  }, [modelEntries, search]);
+
+  const showSearch = modelEntries.length > 10;
+
+  return (
+    <FilterDropdown label="Model" value={displayValue} renderContent={(close) => (<>
+      <FilterOption selected={value === "all"} label="All"
+        tooltip="Average across all models"
+        onClick={() => { onChange("all"); close(); setSearch(""); }} />
+      {showSearch && (
+        <div className="px-3 pb-1 pt-1">
+          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search models..."
+            className="w-full px-2 py-1.5 text-[13px] rounded border border-[var(--color-border)] bg-[var(--color-surface)] text-inherit font-[inherit] outline-none focus:border-[var(--color-primary)]" />
+        </div>
+      )}
+      {filteredModels.map(([id, p]) => (
+        <FilterOption key={id} selected={value === id} label={p.label}
+          tooltip={`Input: $${p.input}/MTok · Output: $${p.output}/MTok${p.cacheWrite ? ` · Cache Write: $${p.cacheWrite}/MTok · Cache Read: $${p.cacheRead}/MTok` : ""}`}
+          onClick={() => { onChange(id); close(); setSearch(""); }} />
+      ))}
+      {filteredModels.length === 0 && (
+        <div className="px-3 py-2 text-[13px] text-[var(--color-muted)]">No models found</div>
+      )}
+    </>)} />
   );
 }
 
@@ -327,7 +427,7 @@ function Recommendations({ sessions, overview }: { sessions: SessionSummary[]; o
   );
 }
 
-function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewMetrics; sessions: SessionSummary[]; pricing: typeof MODEL_PRICING[ModelId] }) {
+function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewMetrics; sessions: SessionSummary[]; pricing: ModelPricing }) {
   const savings = useMemo(() => {
     const currentCacheRate = overview.avg_cache_hit_rate;
     const totalContext = overview.total_input_tokens + overview.total_cache_write_tokens + overview.total_cache_read_tokens;
@@ -548,22 +648,18 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
 
 function SourceFilter({ value, onChange, counts }: { value: string; onChange: (v: string) => void; counts: { all: number; claude: number; codex: number } }) {
   const options = [
-    { label: `All (${counts.all})`, value: "all" },
-    { label: `Claude (${counts.claude})`, value: "claude" },
-    { label: `Codex (${counts.codex})`, value: "codex" },
+    { label: "All", value: "all", count: counts.all },
+    { label: "Claude", value: "claude", count: counts.claude },
+    { label: "Codex", value: "codex", count: counts.codex },
   ];
+  const displayValue = options.find((o) => o.value === value)?.label ?? "All";
   return (
-    <div className={`${pillGroup} bg-[var(--color-border)]`}>
+    <FilterDropdown label="Source" value={displayValue} renderContent={(close) => (<>
       {options.map((o) => (
-        <button
-          key={o.value}
-          className={`${pillBtn} ${pillBtnHover} ${value === o.value ? "bg-[var(--color-surface)] text-[var(--color-primary)] font-semibold shadow-sm" : ""}`}
-          onClick={() => onChange(o.value)}
-        >
-          {o.label}
-        </button>
+        <FilterOption key={o.value} selected={value === o.value} label={o.label}
+          sub={`${o.count}`} onClick={() => { onChange(o.value); close(); }} />
       ))}
-    </div>
+    </>)} />
   );
 }
 
@@ -817,7 +913,9 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>("30d");
-  const [model, setModel] = useState<ModelId>("sonnet");
+  const [model, setModel] = useState<string>("all");
+  const [customDateFrom, setCustomDateFrom] = useState("");
+  const [customDateTo, setCustomDateTo] = useState("");
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -839,11 +937,15 @@ function App() {
     finally { setLoading(false); }
   }, []);
 
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(() => {
     setRefreshing(true); setError(null);
-    try { setAllSessions(await invoke<SessionSummary[]>("refresh_sessions")); }
-    catch (e) { setError(String(e)); }
-    finally { setRefreshing(false); }
+    // Defer invoke to next frame so React renders the loading state first
+    requestAnimationFrame(() => {
+      invoke<SessionSummary[]>("refresh_sessions")
+        .then((data) => setAllSessions(data))
+        .catch((e) => setError(String(e)))
+        .finally(() => setRefreshing(false));
+    });
   }, []);
 
   const loadSessionDetail = useCallback(async (sessionId: string) => {
@@ -857,9 +959,9 @@ function App() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const sessions = useMemo(() => filterByDateRange(allSessions, dateRange), [allSessions, dateRange]);
+  const sessions = useMemo(() => filterByDateRange(allSessions, dateRange, customDateFrom, customDateTo), [allSessions, dateRange, customDateFrom, customDateTo]);
   const pricedSessions = useMemo(() => {
-    const p = MODEL_PRICING[model];
+    const p = getModelPricing(model);
     return sessions.map((s) => ({ ...s, estimated_cost_usd: calcSessionCost(s, p) }));
   }, [sessions, model]);
   const sourceCounts = useMemo(() => ({
@@ -882,42 +984,63 @@ function App() {
 
   if (detailLoading || sessionDetail) {
     return (
-      <main className="max-w-[1400px] mx-auto p-5">
-        <header className="mb-6">
-          <div className="flex justify-between items-start gap-4 flex-wrap"><div><h1 className="text-2xl font-bold whitespace-nowrap">Token Wise</h1><p className="text-sm text-[var(--color-muted)] mt-1 whitespace-nowrap">AI Coding Agent Cost Analyzer</p></div></div>
+      <div>
+        <header className="glass-header mb-6">
+          <div className="max-w-[1400px] mx-auto px-5">
+            <div className="flex items-center gap-4 py-3">
+              <img src="/icon-horizontal.png" alt="Token Wise" className="h-10" />
+            </div>
+          </div>
         </header>
-        {detailLoading ? <div className="text-base p-10">Loading session detail...</div> : sessionDetail ? <SessionDetailView detail={sessionDetail} onBack={() => setSessionDetail(null)} /> : null}
-      </main>
+        <main className="max-w-[1400px] mx-auto px-5">
+          {detailLoading ? <div className="text-base p-10">Loading session detail...</div> : sessionDetail ? <SessionDetailView detail={sessionDetail} onBack={() => setSessionDetail(null)} /> : null}
+        </main>
+      </div>
     );
   }
 
   return (
-    <main className="max-w-[1400px] mx-auto p-5">
-      <header className="mb-6">
-        <div className="flex justify-between items-start gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold whitespace-nowrap">Token Wise</h1>
-            <p className="text-sm text-[var(--color-muted)] mt-1 whitespace-nowrap">AI Coding Agent Cost Analyzer</p>
+    <div>
+      <header className="glass-header mb-6">
+        <div className="max-w-[1400px] mx-auto px-5">
+          <div className="flex items-center gap-6 py-3">
+            <img src="/icon-horizontal.png" alt="Token Wise" className="h-10" />
+            <nav className="flex gap-1 flex-1 justify-center">
+              {([["overview", "Overview"], ["sessions", `Sessions (${overview.total_sessions})`], ["projects", `Projects (${overview.project_summaries.length})`]] as const).map(([t, label]) => (
+                <button
+                  key={t}
+                  className={`border-none px-4 py-1.5 rounded-full text-sm font-medium cursor-pointer transition-all duration-200 font-[inherit] ${tab === t ? "bg-[var(--color-primary)] text-white shadow-sm" : "bg-transparent text-[var(--color-muted)] hover:text-[var(--color-primary)] hover:bg-[rgba(74,144,217,0.08)]"}`}
+                  onClick={() => setTab(t)}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+            <button
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[13px] font-medium text-[var(--color-muted)] cursor-pointer transition-all duration-150 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={refreshData}
+              disabled={refreshing}
+              title="Refresh data"
+            >
+              <svg className={refreshing ? "refresh-spin" : ""} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                <polyline points="21 3 21 8 16 8" />
+                <polyline points="3 21 3 16 8 16" />
+              </svg>
+              Refresh
+            </button>
           </div>
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-3 pb-3 flex-wrap">
             <SourceFilter value={sourceFilter} onChange={setSourceFilter} counts={sourceCounts} />
-            <ModelSelector value={model} onChange={setModel} />
-            <DateRangeSelector value={dateRange} onChange={setDateRange} />
-            <button className="bg-[var(--color-primary)] text-white border-none px-4 py-1.5 rounded-md text-xs font-semibold cursor-pointer font-[inherit] transition-opacity duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed" onClick={refreshData} disabled={refreshing}>{refreshing ? "Refreshing..." : "Refresh"}</button>
+            <ModelSelector value={model} onChange={setModel} sourceFilter={sourceFilter} />
+            <DateRangeSelector value={dateRange} onChange={setDateRange}
+              customFrom={customDateFrom} customTo={customDateTo}
+              onCustomFromChange={setCustomDateFrom} onCustomToChange={setCustomDateTo} />
           </div>
         </div>
       </header>
-      <nav className="flex gap-1 border-b-2 border-[var(--color-border)] mb-6">
-        {([["overview", "Overview"], ["sessions", `Sessions (${overview.total_sessions})`], ["projects", `Projects (${overview.project_summaries.length})`]] as const).map(([t, label]) => (
-          <button
-            key={t}
-            className={`bg-none border-none px-4 py-2 text-sm font-medium cursor-pointer border-b-2 -mb-0.5 transition-colors duration-200 font-[inherit] ${tab === t ? "text-[var(--color-primary)] border-b-[var(--color-primary)]" : "text-[var(--color-muted)] border-b-transparent"} hover:text-[var(--color-primary)]`}
-            onClick={() => setTab(t)}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
+      <main className="max-w-[1400px] mx-auto px-5">
       <div>
         {projectFilter && (
           <div className="flex items-center gap-3 px-3 py-2 bg-[rgba(74,144,217,0.08)] border border-[rgba(74,144,217,0.2)] rounded-md mb-4 text-[13px]">
@@ -932,13 +1055,13 @@ function App() {
             <MetricCard label="Cache Hit Rate" value={formatPercent(overview.avg_cache_hit_rate)} sub="higher is better" />
             <MetricCard label="System Overhead" value={formatTokens(overview.estimated_system_overhead_tokens)} sub="per session (est.)" />
             <MetricCard label="Output Tokens" value={formatTokens(overview.total_output_tokens)} />
-            <MetricCard label="Cache Write Tokens" value={formatTokens(overview.total_cache_write_tokens)} sub={`$${MODEL_PRICING[model].cacheWrite}/MTok`} />
+            <MetricCard label="Cache Write Tokens" value={formatTokens(overview.total_cache_write_tokens)} sub={`$${getModelPricing(model).cacheWrite}/MTok`} />
           </div>
           <CostBar breakdown={overview.cost_breakdown} />
-          <ContextComposition overview={overview} cacheWriteRate={MODEL_PRICING[model].cacheWrite} />
-          <DailyCostChart dailyCosts={overview.daily_costs} pricing={MODEL_PRICING[model]} />
+          <ContextComposition overview={overview} cacheWriteRate={getModelPricing(model).cacheWrite} />
+          <DailyCostChart dailyCosts={overview.daily_costs} pricing={getModelPricing(model)} />
           <Recommendations sessions={pricedSessions} overview={overview} />
-          <SavingsPotential overview={overview} sessions={pricedSessions} pricing={MODEL_PRICING[model]} />
+          <SavingsPotential overview={overview} sessions={pricedSessions} pricing={getModelPricing(model)} />
           <div className="mb-6">
             <h3 className="text-sm font-semibold mb-3">Top Sessions by Cost</h3>
             <SessionsTable sessions={overview.top_sessions} sortField={sortField} sortDir={sortDir} onSort={handleSort} filter="" onFilterChange={() => {}} onSelectSession={loadSessionDetail} />
@@ -948,6 +1071,7 @@ function App() {
         {tab === "projects" && <ProjectsTable projects={overview.project_summaries} onSelectProject={(project) => { setProjectFilter(project); setTab("sessions"); }} />}
       </div>
     </main>
+    </div>
   );
 }
 
