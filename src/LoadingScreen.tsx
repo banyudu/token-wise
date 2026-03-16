@@ -36,23 +36,38 @@ export function LoadingScreen({ message = "Loading your data..." }: { message?: 
         />
       </div>
 
-      {/* Animated bars */}
+      {/* Animated bars — sequential fill, then all reset */}
       <div className="flex gap-1.5 items-center h-3">
-        {colors.map((color, i) => (
-          <motion.div
-            key={i}
-            className="h-2 w-8 rounded-full origin-left"
-            style={{ backgroundColor: color }}
-            initial={{ scaleX: 0 }}
-            animate={{ scaleX: [0, 1, 0] }}
-            transition={{
-              duration: 1.5,
-              repeat: Infinity,
-              delay: i * 0.15,
-              ease,
-            }}
-          />
-        ))}
+        {colors.map((color, i) => {
+          const step = 0.4;
+          const n = colors.length;
+          const fillStart = i * step;
+          const fillEnd = fillStart + step;
+          const holdEnd = n * step + 0.3;
+          const total = holdEnd + 0.01;
+
+          return (
+            <motion.div
+              key={i}
+              className="h-2 w-8 rounded-full origin-left"
+              style={{ backgroundColor: color }}
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: [0, 0, 1, 1, 0] }}
+              transition={{
+                duration: total,
+                times: [
+                  0,
+                  fillStart / total,
+                  fillEnd / total,
+                  holdEnd / total,
+                  1,
+                ],
+                repeat: Infinity,
+                ease: "linear",
+              }}
+            />
+          );
+        })}
       </div>
 
       {/* Text */}
