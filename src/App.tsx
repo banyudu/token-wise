@@ -287,7 +287,7 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub?:
     <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4">
       <div className="text-2xl font-bold leading-tight">{value}</div>
       <div className="text-xs text-[var(--color-muted)] mt-1 uppercase tracking-wide">{label}</div>
-      {sub && <div className="text-[11px] text-[var(--color-muted)] mt-0.5">{sub}</div>}
+      <div className="text-[11px] text-[var(--color-muted)] mt-0.5">{sub ?? "\u00A0"}</div>
     </div>
   );
 }
