@@ -6,8 +6,7 @@ final class StoreKitManager {
     static let shared = StoreKitManager()
 
     let productIds = [
-        "com.banyudu.token-wise.annual",
-        "com.banyudu.token-wise.lifetime"
+        "com.banyudu.token-wise.pro"
     ]
 
     private var products: [Product] = []
@@ -33,19 +32,14 @@ final class StoreKitManager {
         do {
             products = try await Product.products(for: productIds)
             let items = products.map { product -> [String: Any] in
-                var dict: [String: Any] = [
+                [
                     "id": product.id,
                     "displayName": product.displayName,
                     "description": product.description,
                     "displayPrice": product.displayPrice,
                     "price": NSDecimalNumber(decimal: product.price).doubleValue,
+                    "type": "non_consumable",
                 ]
-                if case .autoRenewable = product.type {
-                    dict["type"] = "auto_renewable"
-                } else if case .nonConsumable = product.type {
-                    dict["type"] = "non_consumable"
-                }
-                return dict
             }
             let data = try JSONSerialization.data(withJSONObject: ["ok": true, "products": items])
             return String(data: data, encoding: .utf8) ?? "{\"ok\":false,\"error\":\"encoding\"}"
@@ -91,29 +85,20 @@ final class StoreKitManager {
     // MARK: - Check Entitlements
 
     func checkEntitlements() async -> String {
-        var hasAnnual = false
-        var hasLifetime = false
-        var expiresDate: Date? = nil
+        var hasPro = false
 
         for await result in Transaction.currentEntitlements {
             if case .verified(let transaction) = result {
-                if transaction.productID == "com.banyudu.token-wise.annual" {
-                    hasAnnual = true
-                    expiresDate = transaction.expirationDate
-                } else if transaction.productID == "com.banyudu.token-wise.lifetime" {
-                    hasLifetime = true
+                if transaction.productID == "com.banyudu.token-wise.pro" {
+                    hasPro = true
                 }
             }
         }
 
-        var dict: [String: Any] = [
+        let dict: [String: Any] = [
             "ok": true,
-            "has_annual": hasAnnual,
-            "has_lifetime": hasLifetime,
+            "has_pro": hasPro,
         ]
-        if let exp = expiresDate {
-            dict["annual_expires"] = ISO8601DateFormatter().string(from: exp)
-        }
 
         do {
             let data = try JSONSerialization.data(withJSONObject: dict)

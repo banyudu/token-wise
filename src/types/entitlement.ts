@@ -4,7 +4,7 @@ export interface ProductInfo {
   description: string;
   displayPrice: string;
   price: number;
-  type?: "auto_renewable" | "non_consumable";
+  type?: "non_consumable";
 }
 
 export interface PurchaseResult {
@@ -15,9 +15,7 @@ export interface PurchaseResult {
 
 export interface EntitlementStatus {
   ok: boolean;
-  has_annual?: boolean;
-  has_lifetime?: boolean;
-  annual_expires?: string;
+  has_pro?: boolean;
   error?: string;
 }
 
@@ -33,6 +31,4 @@ export type AppState = "welcome" | "trial" | "expired" | "paid";
 export interface AppEntitlement {
   state: AppState;
   trial_days_remaining: number;
-  purchase_type?: "annual" | "lifetime";
-  annual_expires?: string;
 }

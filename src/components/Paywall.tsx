@@ -15,8 +15,7 @@ export function Paywall({ products, onFetchProducts, onPurchase, onRestore, purc
     onFetchProducts();
   }, [onFetchProducts]);
 
-  const annual = products.find((p) => p.id.includes("annual"));
-  const lifetime = products.find((p) => p.id.includes("lifetime"));
+  const pro = products.find((p) => p.id.includes("pro"));
 
   return (
     <motion.div
@@ -34,7 +33,7 @@ export function Paywall({ products, onFetchProducts, onPurchase, onRestore, purc
           <img src="/icon.png" alt="Token Wise" className="w-20 h-20 mx-auto mb-2 drop-shadow-lg" />
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Your trial has ended</h1>
           <p className="text-gray-500">
-            Continue using Token Wise with a subscription or lifetime purchase.
+            Unlock Token Wise forever with a single purchase.
           </p>
         </motion.div>
 
@@ -44,25 +43,14 @@ export function Paywall({ products, onFetchProducts, onPurchase, onRestore, purc
           transition={{ delay: 0.3 }}
           className="space-y-3"
         >
-          {annual && (
+          {pro && (
             <button
-              onClick={() => onPurchase(annual.id)}
+              onClick={() => onPurchase(pro.id)}
               disabled={purchasing}
               className="w-full py-4 px-6 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold rounded-xl transition-colors"
             >
-              <div className="text-lg">{annual.displayName}</div>
-              <div className="text-indigo-200 text-sm">{annual.displayPrice}/year</div>
-            </button>
-          )}
-
-          {lifetime && (
-            <button
-              onClick={() => onPurchase(lifetime.id)}
-              disabled={purchasing}
-              className="w-full py-4 px-6 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-900 font-semibold rounded-xl transition-colors border border-gray-200"
-            >
-              <div className="text-lg">{lifetime.displayName}</div>
-              <div className="text-gray-500 text-sm">{lifetime.displayPrice} — one-time</div>
+              <div className="text-lg">{pro.displayName}</div>
+              <div className="text-indigo-200 text-sm">{pro.displayPrice} — one-time purchase</div>
             </button>
           )}
 

@@ -50,9 +50,7 @@ pub struct PurchaseResult {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EntitlementStatus {
     pub ok: bool,
-    pub has_annual: Option<bool>,
-    pub has_lifetime: Option<bool>,
-    pub annual_expires: Option<String>,
+    pub has_pro: Option<bool>,
     pub error: Option<String>,
 }
 
