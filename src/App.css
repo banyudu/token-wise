@@ -88,8 +88,6 @@
 /* Virtual table requires structural CSS that can't be inlined */
 @layer components {
   .virtual-table-container {
-    max-height: calc(100vh - 320px);
-    overflow-y: auto;
     overflow-x: auto;
   }
 

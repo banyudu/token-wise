@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
 import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics } from "./types";
 import { LoadingScreen } from "./LoadingScreen";
@@ -563,14 +563,21 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
     });
   }, [sessions, filter, sortField, sortDir]);
 
-  const parentRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
   const ROW_HEIGHT = 36;
 
-  const virtualizer = useVirtualizer({
+  useEffect(() => {
+    if (tableRef.current) {
+      setScrollMargin(tableRef.current.offsetTop);
+    }
+  });
+
+  const virtualizer = useWindowVirtualizer({
     count: filtered.length,
-    getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 20,
+    scrollMargin,
   });
 
   return (
@@ -585,11 +592,11 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
         />
         <span className="text-xs text-[var(--color-muted)]">{filtered.length} sessions</span>
       </div>
-      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg overflow-x-auto virtual-table-container" ref={parentRef}>
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg overflow-x-auto virtual-table-container" ref={tableRef}>
         <table className="w-full border-collapse text-[13px]">
           <thead className="border-b border-[var(--color-border)]">
             <tr>
-              <th className={`${thBase} min-w-[280px]`}>Project</th>
+              <th className={`${thBase} min-w-[360px]`}>Project</th>
               <th className={thBase}>Title</th>
               <th className={thBase}>Branch</th>
               <SortHeader label="Messages" field="messages" currentField={sortField} currentDir={sortDir} onSort={onSort} />
@@ -619,10 +626,10 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
                     left: 0,
                     width: "100%",
                     height: `${virtualRow.size}px`,
-                    transform: `translateY(${virtualRow.start}px)`,
+                    transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                   }}
                 >
-                  <td className={`${tdBase} min-w-[280px] max-w-[400px]`} title={s.project}>{shortenProject(s.project)}</td>
+                  <td className={tdBase} style={{ minWidth: 360, maxWidth: 520 }} title={s.project}>{shortenProject(s.project)}</td>
                   <td className={`${tdBase} max-w-[300px]`} title={s.title ?? ""}>{s.title ?? "\u2014"}</td>
                   <td className={`${tdBase} max-w-[200px]`}>{s.git_branch ?? "\u2014"}</td>
                   <td className={tdBase}>{s.message_count}</td>
@@ -686,7 +693,7 @@ function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary
       <table className="w-full border-collapse text-[13px]">
         <thead className="border-b border-[var(--color-border)]">
           <tr>
-            <th className={`${thBase} min-w-[280px]`}>Project</th>
+            <th className={`${thBase} min-w-[360px]`}>Project</th>
             <th className={sortThCls("sessions")} onClick={() => setSortBy("sessions")}>Sessions {sortBy === "sessions" ? "\u2193" : ""}</th>
             <th className={sortThCls("cost")} onClick={() => setSortBy("cost")}>Total Cost {sortBy === "cost" ? "\u2193" : ""}</th>
             <th className={sortThCls("cache")} onClick={() => setSortBy("cache")}>Cache Hit Rate {sortBy === "cache" ? "\u2193" : ""}</th>
@@ -699,7 +706,7 @@ function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary
         <tbody>
           {sorted.map((p) => (
             <tr key={p.project} className={`hover:bg-[rgba(74,144,217,0.05)] ${onSelectProject ? "cursor-pointer hover:bg-[rgba(74,144,217,0.1)]!" : ""}`} onClick={() => onSelectProject?.(p.project)}>
-              <td className={`${tdBase} min-w-[280px] max-w-[400px]`} title={p.project}>{shortenProject(p.project)}</td>
+              <td className={tdBase} style={{ minWidth: 360, maxWidth: 520 }} title={p.project}>{shortenProject(p.project)}</td>
               <td className={tdBase}>{p.session_count}</td>
               <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(p.total_cost_usd)}</td>
               <td className={tdBase}>{formatPercent(p.avg_cache_hit_rate)}</td>
