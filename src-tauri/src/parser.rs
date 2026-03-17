@@ -1,6 +1,7 @@
 use crate::models::{
-    ClaudeMessage, CodexThread, CodexTokenUsage, DailyCost, OverviewMetrics, PricingInfo,
-    ProjectSummary, SessionDetail, SessionSummary, TurnMetrics,
+    ClaudeMessage, CodexThread, CodexTokenUsage, ContentAnalysis, ContentCategory, ContentItem,
+    DailyCost, OverviewMetrics, PricingInfo, ProjectSummary, SessionDetail, SessionSummary,
+    TurnMetrics,
 };
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -189,6 +190,341 @@ fn summarize_session(
     }
 }
 
+fn classify_tool(tool_name: &str) -> (&'static str, Option<String>) {
+    match tool_name {
+        "Read" => ("File Reads", None),
+        "Grep" | "Glob" => ("Code Search", None),
+        "Bash" => ("Shell Commands", None),
+        "WebFetch" | "WebSearch" => ("Web Content", None),
+        "Edit" | "Write" => ("File Edits", None),
+        "Agent" => ("Subagents", None),
+        name if name.starts_with("Task") => ("Subagents", None),
+        name if name.starts_with("mcp__") => {
+            // Extract service name: mcp__<service>__<method> or mcp__<a>_<b>__<method>
+            let rest = &name[5..]; // skip "mcp__"
+            let subcategory = rest
+                .find("__")
+                .map(|i| rest[..i].to_string())
+                .unwrap_or_else(|| rest.to_string());
+            ("External Tools", Some(subcategory))
+        }
+        _ => ("Other Tools", None),
+    }
+}
+
+fn measure_content_bytes(value: &serde_json::Value) -> u64 {
+    match value {
+        serde_json::Value::String(s) => s.len() as u64,
+        serde_json::Value::Array(arr) => arr.iter().map(|v| measure_content_bytes(v)).sum(),
+        serde_json::Value::Object(map) => map.values().map(|v| measure_content_bytes(v)).sum(),
+        serde_json::Value::Number(n) => n.to_string().len() as u64,
+        serde_json::Value::Bool(_) => 5,
+        serde_json::Value::Null => 4,
+    }
+}
+
+fn extract_preview(value: &serde_json::Value, max_len: usize) -> String {
+    let text = match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => {
+            // Find first text content block
+            arr.iter()
+                .find_map(|item| {
+                    if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        item.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    } else {
+                        item.get("content")
+                            .and_then(|c| c.as_str())
+                            .map(|s| s.to_string())
+                    }
+                })
+                .unwrap_or_default()
+        }
+        _ => serde_json::to_string(value).unwrap_or_default(),
+    };
+    let trimmed = text.trim().replace('\n', " ");
+    if trimmed.chars().count() > max_len {
+        let truncated: String = trimmed.chars().take(max_len - 3).collect();
+        format!("{}...", truncated)
+    } else {
+        trimmed
+    }
+}
+
+fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
+    // Step A: Build tool_use_id → tool_name map
+    let mut tool_use_map: HashMap<String, String> = HashMap::new();
+    for msg in messages {
+        let inner = match msg.message.as_ref() {
+            Some(m) => m,
+            None => continue,
+        };
+        if inner.role.as_deref() != Some("assistant") {
+            continue;
+        }
+        let content = match inner.content.as_ref() {
+            Some(c) => c,
+            None => continue,
+        };
+        if let serde_json::Value::Array(blocks) = content {
+            for block in blocks {
+                if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                    if let (Some(id), Some(name)) = (
+                        block.get("id").and_then(|v| v.as_str()),
+                        block.get("name").and_then(|v| v.as_str()),
+                    ) {
+                        tool_use_map.insert(id.to_string(), name.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Step B: Classify and measure all content blocks
+    struct BlockInfo {
+        category: String,
+        subcategory: Option<String>,
+        tool_name: Option<String>,
+        byte_size: u64,
+        preview: String,
+        turn_index: u32,
+    }
+
+    let mut blocks: Vec<BlockInfo> = Vec::new();
+    let mut turn_index = 0u32;
+
+    for msg in messages {
+        let inner = match msg.message.as_ref() {
+            Some(m) => m,
+            None => continue,
+        };
+        let role = inner.role.as_deref().unwrap_or("");
+        let content = match inner.content.as_ref() {
+            Some(c) => c,
+            None => continue,
+        };
+
+        match content {
+            serde_json::Value::String(s) => {
+                let category = match role {
+                    "user" => "User Prompts",
+                    "assistant" => "Assistant Text",
+                    _ => "Other",
+                };
+                blocks.push(BlockInfo {
+                    category: category.to_string(),
+                    subcategory: None,
+                    tool_name: None,
+                    byte_size: s.len() as u64,
+                    preview: extract_preview(content, 80),
+                    turn_index,
+                });
+            }
+            serde_json::Value::Array(arr) => {
+                for block in arr {
+                    let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    let byte_size = measure_content_bytes(block);
+
+                    match block_type {
+                        "tool_result" => {
+                            let tool_use_id = block
+                                .get("tool_use_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            let tool_name = tool_use_map.get(tool_use_id).cloned();
+                            let (cat, subcat) = tool_name
+                                .as_deref()
+                                .map(classify_tool)
+                                .unwrap_or(("Other Tools", None));
+
+                            let result_content = block.get("content").unwrap_or(block);
+                            blocks.push(BlockInfo {
+                                category: cat.to_string(),
+                                subcategory: subcat,
+                                tool_name,
+                                byte_size,
+                                preview: extract_preview(result_content, 80),
+                                turn_index,
+                            });
+                        }
+                        "tool_use" => {
+                            let name = block
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            let (cat, subcat) = classify_tool(name);
+                            // Only measure input for file-writing tools
+                            if cat == "File Edits" {
+                                let input_bytes = block
+                                    .get("input")
+                                    .map(measure_content_bytes)
+                                    .unwrap_or(0);
+                                if input_bytes > 0 {
+                                    blocks.push(BlockInfo {
+                                        category: cat.to_string(),
+                                        subcategory: subcat,
+                                        tool_name: Some(name.to_string()),
+                                        byte_size: input_bytes,
+                                        preview: extract_preview(
+                                            block.get("input").unwrap_or(block),
+                                            80,
+                                        ),
+                                        turn_index,
+                                    });
+                                }
+                            }
+                        }
+                        "thinking" => {
+                            blocks.push(BlockInfo {
+                                category: "Thinking".to_string(),
+                                subcategory: None,
+                                tool_name: None,
+                                byte_size,
+                                preview: extract_preview(block, 80),
+                                turn_index,
+                            });
+                        }
+                        "text" => {
+                            let category = match role {
+                                "user" => "User Prompts",
+                                "assistant" => "Assistant Text",
+                                _ => "Other",
+                            };
+                            blocks.push(BlockInfo {
+                                category: category.to_string(),
+                                subcategory: None,
+                                tool_name: None,
+                                byte_size,
+                                preview: extract_preview(block, 80),
+                                turn_index,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        if msg.r#type == "user" || msg.r#type == "assistant" {
+            turn_index += 1;
+        }
+    }
+
+    // Step C: Aggregate by category
+    let mut cat_map: HashMap<String, (u64, u32, Option<String>)> = HashMap::new();
+    let total_bytes: u64 = blocks.iter().map(|b| b.byte_size).sum();
+    let total_estimated_tokens = total_bytes / 4;
+
+    for b in &blocks {
+        let key = if let Some(ref sub) = b.subcategory {
+            format!("{}:{}", b.category, sub)
+        } else {
+            b.category.clone()
+        };
+        let entry = cat_map.entry(key).or_insert((0, 0, b.subcategory.clone()));
+        entry.0 += b.byte_size;
+        entry.1 += 1;
+    }
+
+    let mut categories: Vec<ContentCategory> = cat_map
+        .into_iter()
+        .map(|(key, (bytes, count, subcategory))| {
+            let category = if let Some(idx) = key.find(':') {
+                key[..idx].to_string()
+            } else {
+                key
+            };
+            let est_tokens = bytes / 4;
+            let percentage = if total_estimated_tokens > 0 {
+                est_tokens as f64 / total_estimated_tokens as f64 * 100.0
+            } else {
+                0.0
+            };
+            ContentCategory {
+                category,
+                subcategory,
+                estimated_tokens: est_tokens,
+                byte_size: bytes,
+                count,
+                percentage,
+            }
+        })
+        .collect();
+    categories.sort_by(|a, b| b.estimated_tokens.cmp(&a.estimated_tokens));
+
+    // Collect top 10 largest individual blocks
+    let mut block_indices: Vec<usize> = (0..blocks.len()).collect();
+    block_indices.sort_by(|&a, &b| blocks[b].byte_size.cmp(&blocks[a].byte_size));
+    block_indices.truncate(10);
+
+    let top_items: Vec<ContentItem> = block_indices
+        .into_iter()
+        .map(|i| {
+            let b = &blocks[i];
+            ContentItem {
+                category: b.category.clone(),
+                tool_name: b.tool_name.clone(),
+                estimated_tokens: b.byte_size / 4,
+                preview: b.preview.clone(),
+                turn_index: b.turn_index,
+            }
+        })
+        .collect();
+
+    // Step D: Generate suggestions
+    let mut suggestions = Vec::new();
+
+    // Aggregate category percentages
+    let mut cat_pct: HashMap<&str, f64> = HashMap::new();
+    for c in &categories {
+        *cat_pct.entry(&c.category).or_insert(0.0) += c.percentage;
+    }
+
+    if cat_pct.get("File Reads").copied().unwrap_or(0.0) > 40.0 {
+        suggestions.push(
+            "File Reads consume >40% of tokens. Consider using targeted Grep/Glob instead of reading entire files."
+                .to_string(),
+        );
+    }
+    if cat_pct.get("Shell Commands").copied().unwrap_or(0.0) > 30.0 {
+        suggestions.push(
+            "Shell Commands consume >30% of tokens. Consider limiting output with head/tail or more specific commands."
+                .to_string(),
+        );
+    }
+    if cat_pct.get("Web Content").copied().unwrap_or(0.0) > 25.0 {
+        suggestions.push(
+            "Web Content consumes >25% of tokens. Consider targeted extraction instead of full page fetches."
+                .to_string(),
+        );
+    }
+    if cat_pct.get("External Tools").copied().unwrap_or(0.0) > 20.0 {
+        suggestions.push(
+            "External Tools (MCP) consume >20% of tokens. Consider requesting less data from MCP services."
+                .to_string(),
+        );
+    }
+    for item in &top_items {
+        if item.estimated_tokens > 50_000 {
+            suggestions.push(format!(
+                "Large block: {} ({}) with ~{}K est. tokens at turn {}. Consider reducing its size.",
+                item.category,
+                item.tool_name.as_deref().unwrap_or("unknown"),
+                item.estimated_tokens / 1000,
+                item.turn_index + 1
+            ));
+        }
+    }
+
+    ContentAnalysis {
+        categories,
+        total_estimated_tokens,
+        top_items,
+        suggestions,
+    }
+}
+
 pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<SessionDetail> {
     let projects_dir = get_claude_projects_dir()?;
     let pattern = format!("{}/**/{}.jsonl", projects_dir.display(), session_id);
@@ -259,8 +595,9 @@ pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<Ses
             }
         }
 
+        let content_analysis = Some(analyze_content(&messages));
         let summary = summarize_session(session_id, &messages, pricing, subagent_cost, subagent_count);
-        return Some(SessionDetail { summary, turns });
+        return Some(SessionDetail { summary, turns, content_analysis });
     }
 
     None

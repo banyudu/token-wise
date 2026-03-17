@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
-import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics } from "./types";
+import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory } from "./types";
 import { LoadingScreen } from "./LoadingScreen";
 
 import "./App.css";
@@ -859,6 +859,207 @@ function costColor(cost: number, maxCost: number): string {
   return "var(--color-cache-read)";
 }
 
+const CATEGORY_COLORS: Record<string, string> = {
+  "File Reads": "#4A90D9",
+  "Code Search": "#7B68EE",
+  "Shell Commands": "#E74C3C",
+  "File Edits": "#F39C12",
+  "Web Content": "#1ABC9C",
+  "Subagents": "#9B59B6",
+  "External Tools": "#27AE60",
+  "Thinking": "#95A5A6",
+  "Assistant Text": "#3498DB",
+  "User Prompts": "#E67E22",
+  "Other Tools": "#BDC3C7",
+  "Other": "#BDC3C7",
+};
+
+function DonutChart({ categories, total }: { categories: ContentCategory[]; total: number }) {
+  const size = 200;
+  const cx = size / 2;
+  const cy = size / 2;
+  const outerR = 90;
+  const innerR = 55;
+
+  if (total === 0) return null;
+
+  const segments: { path: string; color: string; label: string; pct: number }[] = [];
+  let cumAngle = -Math.PI / 2;
+
+  // Merge small categories into a combined list sorted by tokens
+  const sorted = [...categories].sort((a, b) => b.estimated_tokens - a.estimated_tokens);
+
+  for (const cat of sorted) {
+    const fraction = cat.estimated_tokens / total;
+    if (fraction < 0.005) continue;
+    const angle = fraction * 2 * Math.PI;
+    const startAngle = cumAngle;
+    const endAngle = cumAngle + angle;
+    const largeArc = angle > Math.PI ? 1 : 0;
+
+    const x1o = cx + outerR * Math.cos(startAngle);
+    const y1o = cy + outerR * Math.sin(startAngle);
+    const x2o = cx + outerR * Math.cos(endAngle);
+    const y2o = cy + outerR * Math.sin(endAngle);
+    const x1i = cx + innerR * Math.cos(endAngle);
+    const y1i = cy + innerR * Math.sin(endAngle);
+    const x2i = cx + innerR * Math.cos(startAngle);
+    const y2i = cy + innerR * Math.sin(startAngle);
+
+    const path = `M ${x1o} ${y1o} A ${outerR} ${outerR} 0 ${largeArc} 1 ${x2o} ${y2o} L ${x1i} ${y1i} A ${innerR} ${innerR} 0 ${largeArc} 0 ${x2i} ${y2i} Z`;
+    segments.push({ path, color: CATEGORY_COLORS[cat.category] || "#BDC3C7", label: cat.category, pct: cat.percentage });
+    cumAngle = endAngle;
+  }
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block mx-auto">
+      {segments.map((seg, i) => (
+        <path key={i} d={seg.path} fill={seg.color} stroke="var(--color-surface)" strokeWidth="1.5">
+          <title>{seg.label}: {seg.pct.toFixed(1)}%</title>
+        </path>
+      ))}
+      <text x={cx} y={cy - 6} textAnchor="middle" fill="var(--color-text)" fontSize="16" fontWeight="bold">{formatTokens(total)}</text>
+      <text x={cx} y={cy + 12} textAnchor="middle" fill="var(--color-muted)" fontSize="11">est. tokens</text>
+    </svg>
+  );
+}
+
+function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
+  const [showTopItems, setShowTopItems] = useState(false);
+
+  // Merge categories by category name for the legend
+  const mergedCategories = useMemo(() => {
+    const map = new Map<string, { tokens: number; count: number; pct: number }>();
+    for (const c of analysis.categories) {
+      const existing = map.get(c.category);
+      if (existing) {
+        existing.tokens += c.estimated_tokens;
+        existing.count += c.count;
+        existing.pct += c.percentage;
+      } else {
+        map.set(c.category, { tokens: c.estimated_tokens, count: c.count, pct: c.percentage });
+      }
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1].tokens - a[1].tokens)
+      .map(([name, data]) => ({ name, ...data }));
+  }, [analysis.categories]);
+
+  return (
+    <div className="mb-6">
+      <h3 className="text-sm font-semibold mb-3">Content Analysis</h3>
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4">
+        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-6 items-start">
+          {/* Donut chart */}
+          <DonutChart categories={analysis.categories} total={analysis.total_estimated_tokens} />
+
+          {/* Category legend + table */}
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[13px]">
+              <thead className="border-b border-[var(--color-border)]">
+                <tr>
+                  <th className={thBase}>Category</th>
+                  <th className={thBase}>Est. Tokens</th>
+                  <th className={thBase}>Count</th>
+                  <th className={thBase}>%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mergedCategories.map((c) => (
+                  <tr key={c.name} className="hover:bg-[rgba(74,144,217,0.05)]">
+                    <td className={tdBase}>
+                      <span className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle" style={{ backgroundColor: CATEGORY_COLORS[c.name] || "#BDC3C7" }} />
+                      {c.name}
+                    </td>
+                    <td className={tdBase}>{formatTokens(c.tokens)}</td>
+                    <td className={tdBase}>{c.count}</td>
+                    <td className={tdBase}>{c.pct.toFixed(1)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Subcategory detail for categories with subcategories */}
+            {analysis.categories.filter(c => c.subcategory).length > 0 && (
+              <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
+                <div className="text-[11px] text-[var(--color-muted)] font-semibold mb-2 uppercase">Subcategories</div>
+                <table className="w-full border-collapse text-[12px]">
+                  <tbody>
+                    {analysis.categories.filter(c => c.subcategory).map((c, i) => (
+                      <tr key={i} className="hover:bg-[rgba(74,144,217,0.05)]">
+                        <td className={tdBase}>
+                          <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ backgroundColor: CATEGORY_COLORS[c.category] || "#BDC3C7" }} />
+                          {c.category} / {c.subcategory}
+                        </td>
+                        <td className={tdBase}>{formatTokens(c.estimated_tokens)}</td>
+                        <td className={tdBase}>{c.count}</td>
+                        <td className={tdBase}>{c.percentage.toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Top items (collapsible) */}
+        {analysis.top_items.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-[var(--color-border)]">
+            <button
+              className="bg-none border-none text-[13px] font-semibold cursor-pointer text-[var(--color-primary)] p-0 hover:underline"
+              onClick={() => setShowTopItems(!showTopItems)}
+            >
+              {showTopItems ? "\u25BC" : "\u25B6"} Top {analysis.top_items.length} Largest Content Blocks
+            </button>
+            {showTopItems && (
+              <table className="w-full border-collapse text-[12px] mt-2">
+                <thead className="border-b border-[var(--color-border)]">
+                  <tr>
+                    <th className={thBase}>Turn</th>
+                    <th className={thBase}>Category</th>
+                    <th className={thBase}>Tool</th>
+                    <th className={thBase}>Est. Tokens</th>
+                    <th className={thBase}>Preview</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analysis.top_items.map((item, i) => (
+                    <tr key={i} className="hover:bg-[rgba(74,144,217,0.05)]">
+                      <td className={tdBase}>{item.turn_index + 1}</td>
+                      <td className={tdBase}>
+                        <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ backgroundColor: CATEGORY_COLORS[item.category] || "#BDC3C7" }} />
+                        {item.category}
+                      </td>
+                      <td className={tdBase}>{item.tool_name ?? "\u2014"}</td>
+                      <td className={tdBase}>{formatTokens(item.estimated_tokens)}</td>
+                      <td className={`${tdBase} max-w-[300px] truncate`} title={item.preview}>{item.preview || "\u2014"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Suggestions */}
+        {analysis.suggestions.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-[var(--color-border)]">
+            <div className="bg-[rgba(74,144,217,0.08)] border border-[rgba(74,144,217,0.2)] rounded-lg p-3">
+              <div className="text-[12px] font-semibold text-[var(--color-primary)] mb-2">Optimization Suggestions</div>
+              <ul className="list-none p-0 m-0">
+                {analysis.suggestions.map((s, i) => (
+                  <li key={i} className="text-[12px] text-[var(--color-muted)] mb-1 pl-4 relative before:content-['•'] before:absolute before:left-0 before:text-[var(--color-primary)]">{s}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: () => void }) {
   const { summary, turns } = detail;
   const firstTurnCacheWrite = turns.length > 0 ? turns[0].cache_write_tokens : 0;
@@ -885,6 +1086,7 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
           <MetricCard label="Ephemeral Cache" value={formatTokens(summary.ephemeral_5m_tokens + summary.ephemeral_1h_tokens)} sub={`5m: ${formatTokens(summary.ephemeral_5m_tokens)} / 1h: ${formatTokens(summary.ephemeral_1h_tokens)}`} />
         )}
       </div>
+      {detail.content_analysis && <ContentAnalysisView analysis={detail.content_analysis} />}
       <ContextGrowthChart turns={turns} />
       <div className="mb-6">
         <h3 className="text-sm font-semibold mb-3">Turn-by-Turn Metrics</h3>

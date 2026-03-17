@@ -76,9 +76,34 @@ export interface TurnMetrics {
   timestamp: string | null;
 }
 
+export interface ContentCategory {
+  category: string;
+  subcategory: string | null;
+  estimated_tokens: number;
+  byte_size: number;
+  count: number;
+  percentage: number;
+}
+
+export interface ContentItem {
+  category: string;
+  tool_name: string | null;
+  estimated_tokens: number;
+  preview: string;
+  turn_index: number;
+}
+
+export interface ContentAnalysis {
+  categories: ContentCategory[];
+  total_estimated_tokens: number;
+  top_items: ContentItem[];
+  suggestions: string[];
+}
+
 export interface SessionDetail {
   summary: SessionSummary;
   turns: TurnMetrics[];
+  content_analysis: ContentAnalysis | null;
 }
 
 export interface PricingInfo {
