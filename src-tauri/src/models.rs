@@ -111,7 +111,7 @@ pub struct ContentItem {
 pub struct ContentAnalysis {
     pub categories: Vec<ContentCategory>,
     pub total_estimated_tokens: u64,
-    pub top_items: Vec<ContentItem>,
+    pub all_items: Vec<ContentItem>,
     pub suggestions: Vec<String>,
 }
 

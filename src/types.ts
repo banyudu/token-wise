@@ -98,7 +98,7 @@ export interface ContentItem {
 export interface ContentAnalysis {
   categories: ContentCategory[];
   total_estimated_tokens: number;
-  top_items: ContentItem[];
+  all_items: ContentItem[];
   suggestions: string[];
 }
 

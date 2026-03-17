@@ -540,12 +540,11 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
         .collect();
     categories.sort_by(|a, b| b.estimated_tokens.cmp(&a.estimated_tokens));
 
-    // Collect top 10 largest individual blocks
+    // Collect all blocks sorted by size (largest first)
     let mut block_indices: Vec<usize> = (0..blocks.len()).collect();
     block_indices.sort_by(|&a, &b| blocks[b].byte_size.cmp(&blocks[a].byte_size));
-    block_indices.truncate(10);
 
-    let top_items: Vec<ContentItem> = block_indices
+    let all_items: Vec<ContentItem> = block_indices
         .into_iter()
         .map(|i| {
             let b = &blocks[i];
@@ -594,7 +593,7 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
                 .to_string(),
         );
     }
-    for item in &top_items {
+    for item in all_items.iter().take(10) {
         if item.estimated_tokens > 50_000 {
             suggestions.push(format!(
                 "Large block: {} ({}) with ~{}K est. tokens at turn {}. Consider reducing its size.",
@@ -609,7 +608,7 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
     ContentAnalysis {
         categories,
         total_estimated_tokens,
-        top_items,
+        all_items,
         suggestions,
     }
 }
