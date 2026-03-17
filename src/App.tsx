@@ -352,7 +352,7 @@ function DailyCostChart({ dailyCosts, pricing }: { dailyCosts: OverviewMetrics["
   );
 }
 
-function SortHeader({ label, field, currentField, currentDir, onSort }: { label: string; field: SortField; currentField: SortField; currentDir: SortDir; onSort: (f: SortField) => void }) {
+function SortHeader({ label, field, currentField, currentDir, onSort }: { label: string; field: SortField; currentField: SortField | null; currentDir: SortDir; onSort: (f: SortField) => void }) {
   const active = currentField === field;
   return (
     <th
@@ -537,7 +537,7 @@ const thBase = "text-left px-3 py-2.5 font-semibold text-[11px] uppercase tracki
 const tdBase = "px-3 py-2 border-t border-[var(--color-border)] whitespace-nowrap max-w-[200px] overflow-hidden text-ellipsis";
 
 function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterChange, onSelectSession }: {
-  sessions: SessionSummary[]; sortField: SortField; sortDir: SortDir; onSort: (f: SortField) => void;
+  sessions: SessionSummary[]; sortField: SortField | null; sortDir: SortDir; onSort: (f: SortField) => void;
   filter: string; onFilterChange: (v: string) => void; onSelectSession?: (id: string) => void;
 }) {
   const filtered = useMemo(() => {
@@ -546,6 +546,7 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
       const q = filter.toLowerCase();
       result = result.filter((s) => s.project.toLowerCase().includes(q) || (s.git_branch ?? "").toLowerCase().includes(q) || s.source.toLowerCase().includes(q) || (s.title ?? "").toLowerCase().includes(q));
     }
+    if (!sortField) return result;
     return [...result].sort((a, b) => {
       let cmp = 0;
       switch (sortField) {
@@ -754,9 +755,9 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
     }
   }, []);
 
-  // For many turns, show every Nth label adjusted by zoom
+  // For many turns, show every Nth label — cap at ~20 visible labels max
   const effectiveTurns = turns.length / zoom;
-  const labelInterval = effectiveTurns > 80 ? 10 : effectiveTurns > 40 ? 5 : effectiveTurns > 20 ? 2 : 1;
+  const labelInterval = effectiveTurns > 400 ? 50 : effectiveTurns > 200 ? 20 : effectiveTurns > 80 ? 10 : effectiveTurns > 40 ? 5 : effectiveTurns > 20 ? 2 : 1;
 
   return (
     <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4 mb-6">
@@ -817,7 +818,7 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
               : mode === "per-turn"
                 ? (perTurnTotal / maxPerTurn) * 100
                 : (t.cumulative_context / maxCumulative) * 100;
-            const showLabel = (t.turn_index % labelInterval === 0) || t.turn_index === turns.length - 1;
+            const showLabel = t.turn_index === 0 || ((t.turn_index + 1) % labelInterval === 0) || t.turn_index === turns.length - 1;
             return (
               <div key={`${mode}-${t.turn_index}`} className="flex-1 flex flex-col items-center min-w-0" title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)}, cache hit ${formatPercent(t.cache_hit_rate)}`}>
                 <div className="w-full h-[160px] flex flex-col justify-end">
@@ -831,7 +832,7 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
                     </>) : <div className="w-full" style={{ flex: 1, backgroundColor: "var(--color-primary)" }} />}
                   </div>
                 </div>
-                <div className={`text-[9px] mt-1 ${showLabel ? "text-[var(--color-muted)]" : "text-transparent"}`}>{t.turn_index + 1}</div>
+                <div className={`text-[9px] mt-1 select-none ${showLabel ? "text-[var(--color-muted)]" : "text-transparent"}`}>{t.turn_index + 1}</div>
               </div>
             );
           })}
@@ -928,15 +929,17 @@ function App() {
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [sortField, setSortField] = useState<SortField>("date");
+  const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [filter, setFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
 
   const handleSort = (field: SortField) => {
-    if (field === sortField) setSortDir(sortDir === "desc" ? "asc" : "desc");
-    else { setSortField(field); setSortDir("desc"); }
+    if (field === sortField) {
+      if (sortDir === "desc") setSortDir("asc");
+      else { setSortField(null); setSortDir("desc"); }
+    } else { setSortField(field); setSortDir("desc"); }
   };
 
   const loadData = useCallback(async () => {
