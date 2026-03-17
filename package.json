@@ -10,7 +10,11 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:dev:force": "snipe-port 5613 && tauri dev"
+    "tauri:dev:force": "snipe-port 5613 && tauri dev",
+    "tauri:build:mac": "tauri build --bundles app --target universal-apple-darwin",
+    "tauri:pkg:mac": "xcrun productbuild --sign \"${MAC_INSTALLER_IDENTITY:?}\" --component target/universal-apple-darwin/release/bundle/macos/token-wise.app /Applications token-wise.pkg",
+    "tauri:upload:mac": "xcrun altool --upload-app --type macos --file token-wise.pkg --apiKey ${APPLE_API_KEY_ID:?} --apiIssuer ${APPLE_API_ISSUER:?}",
+    "tauri:publish:mac": "pnpm tauri:build:mac && pnpm tauri:pkg:mac && pnpm tauri:upload:mac"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
