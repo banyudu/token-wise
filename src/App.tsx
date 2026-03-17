@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
-import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory } from "./types";
+import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem } from "./types";
+import { codeToHtml } from "shiki";
 import { LoadingScreen } from "./LoadingScreen";
 
 import "./App.css";
@@ -597,7 +598,7 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
         <table className="w-full border-collapse text-[13px]">
           <thead className="border-b border-[var(--color-border)]">
             <tr>
-              <th className={`${thBase} min-w-[360px]`}>Project</th>
+              <th className={`${thBase} w-[240px] min-w-[240px]`}>Project</th>
               <th className={thBase}>Title</th>
               <th className={thBase}>Branch</th>
               <SortHeader label="Messages" field="messages" currentField={sortField} currentDir={sortDir} onSort={onSort} />
@@ -630,7 +631,7 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
                     transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                   }}
                 >
-                  <td className={tdBase} style={{ minWidth: 360, maxWidth: 520 }} title={s.project}>{shortenProject(s.project)}</td>
+                  <td className={tdBase} style={{ width: 240, minWidth: 240 }} title={s.project}>{shortenProject(s.project)}</td>
                   <td className={`${tdBase} max-w-[300px]`} title={s.title ?? ""}>{s.title ?? "\u2014"}</td>
                   <td className={`${tdBase} max-w-[200px]`}>{s.git_branch ?? "\u2014"}</td>
                   <td className={tdBase}>{s.message_count}</td>
@@ -694,7 +695,7 @@ function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary
       <table className="w-full border-collapse text-[13px]">
         <thead className="border-b border-[var(--color-border)]">
           <tr>
-            <th className={`${thBase} min-w-[360px]`}>Project</th>
+            <th className={`${thBase} w-[240px] min-w-[240px]`}>Project</th>
             <th className={sortThCls("sessions")} onClick={() => setSortBy("sessions")}>Sessions {sortBy === "sessions" ? "\u2193" : ""}</th>
             <th className={sortThCls("cost")} onClick={() => setSortBy("cost")}>Total Cost {sortBy === "cost" ? "\u2193" : ""}</th>
             <th className={sortThCls("cache")} onClick={() => setSortBy("cache")}>Cache Hit Rate {sortBy === "cache" ? "\u2193" : ""}</th>
@@ -924,8 +925,116 @@ function DonutChart({ categories, total }: { categories: ContentCategory[]; tota
   );
 }
 
+const EXT_TO_LANG: Record<string, string> = {
+  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx",
+  rs: "rust", py: "python", rb: "ruby", go: "go", java: "java",
+  kt: "kotlin", swift: "swift", c: "c", cpp: "cpp", h: "c", hpp: "cpp",
+  cs: "csharp", php: "php", sh: "bash", bash: "bash", zsh: "bash",
+  json: "json", yaml: "yaml", yml: "yaml", toml: "toml",
+  html: "html", css: "css", scss: "scss", less: "less",
+  sql: "sql", md: "markdown", xml: "xml", vue: "vue", svelte: "svelte",
+  dockerfile: "dockerfile", makefile: "makefile",
+  lock: "text", txt: "text", log: "text", env: "text",
+};
+
+function detectLang(source: string | null, category: string): string {
+  if (source) {
+    const match = source.match(/\.([a-zA-Z0-9]+)$/);
+    if (match) {
+      const ext = match[1].toLowerCase();
+      if (EXT_TO_LANG[ext]) return EXT_TO_LANG[ext];
+    }
+    const basename = source.split("/").pop()?.toLowerCase() ?? "";
+    if (basename === "dockerfile") return "dockerfile";
+    if (basename === "makefile") return "makefile";
+  }
+  if (category === "Shell Commands") return "bash";
+  if (category === "Web Content") return "html";
+  return "text";
+}
+
+function stripAnsiCodes(content: string): string {
+  // eslint-disable-next-line no-control-regex
+  return content.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\].*?(\x07|\x1b\\)/g, "");
+}
+
+function stripLineNumbers(content: string): string {
+  const lines = content.split("\n");
+  if (lines.length < 2) return content;
+  // Match patterns like "  1→", " 10→", "100→" (spaces + digits + tab or → arrow)
+  const pattern = /^\s*\d+[\t\u2192→]/;
+  const matchCount = lines.filter((l) => pattern.test(l) || l.trim() === "").length;
+  if (matchCount / lines.length > 0.7) {
+    return lines.map((l) => l.replace(/^\s*\d+[\t\u2192→]/, "")).join("\n");
+  }
+  return content;
+}
+
+function useShikiHtml(code: string, lang: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setReady(false);
+
+    const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    codeToHtml(code, {
+      lang,
+      theme: isDark ? "github-dark" : "github-light",
+    }).then((html) => {
+      if (!cancelled && ref.current) {
+        // Safe: html is generated by shiki from local content, not user web input
+        ref.current.innerHTML = html;
+        setReady(true);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [code, lang]);
+
+  return { ref, ready };
+}
+
+function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => void }) {
+  const lang = useMemo(() => detectLang(item.source, item.category), [item.source, item.category]);
+  const code = useMemo(() => stripAnsiCodes(stripLineNumbers(item.full_content)), [item.full_content]);
+  const { ref: codeRef, ready } = useShikiHtml(code, lang);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-xl max-w-[900px] max-h-[85vh] w-[92vw] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-sm font-semibold shrink-0">Content Preview</span>
+            {item.source && <span className="text-[12px] text-[var(--color-muted)] truncate" title={item.source}>{item.source}</span>}
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)] shrink-0">{lang}</span>
+          </div>
+          <button
+            className="bg-none border-none text-[var(--color-muted)] cursor-pointer text-lg leading-none hover:text-[var(--color-text)] ml-3 shrink-0"
+            onClick={onClose}
+          >&times;</button>
+        </div>
+        <div className="overflow-auto flex-1 preview-dialog-content">
+          <div
+            ref={codeRef}
+            className="text-[13px] leading-relaxed [&_pre]:!m-0 [&_pre]:!p-4 [&_pre]:!rounded-none [&_code]:!text-[13px]"
+            style={{ display: ready ? undefined : "none" }}
+          />
+          {!ready && (
+            <pre className="text-[13px] whitespace-pre-wrap break-words m-0 p-4 text-[var(--color-text)] font-mono">{code}</pre>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
   const [showTopItems, setShowTopItems] = useState(false);
+  const [previewItem, setPreviewItem] = useState<ContentItem | null>(null);
 
   // Merge categories by category name for the legend
   const mergedCategories = useMemo(() => {
@@ -1019,6 +1128,7 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
                     <th className={thBase}>Turn</th>
                     <th className={thBase}>Category</th>
                     <th className={thBase}>Tool</th>
+                    <th className={thBase}>Source</th>
                     <th className={thBase}>Est. Tokens</th>
                     <th className={thBase}>Preview</th>
                   </tr>
@@ -1032,13 +1142,22 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
                         {item.category}
                       </td>
                       <td className={tdBase}>{item.tool_name ?? "\u2014"}</td>
+                      <td className={`${tdBase} max-w-[260px] truncate`} title={item.source ?? undefined}>{item.source ?? "\u2014"}</td>
                       <td className={tdBase}>{formatTokens(item.estimated_tokens)}</td>
-                      <td className={`${tdBase} max-w-[300px] truncate`} title={item.preview}>{item.preview || "\u2014"}</td>
+                      <td className={tdBase}>
+                        {item.full_content ? (
+                          <button
+                            className="bg-[rgba(74,144,217,0.1)] border border-[rgba(74,144,217,0.3)] text-[var(--color-primary)] text-[11px] px-2 py-0.5 rounded cursor-pointer hover:bg-[rgba(74,144,217,0.2)] transition-colors"
+                            onClick={() => setPreviewItem(item)}
+                          >View</button>
+                        ) : "\u2014"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             )}
+            {previewItem && <PreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />}
           </div>
         )}
 

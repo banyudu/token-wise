@@ -251,9 +251,81 @@ fn extract_preview(value: &serde_json::Value, max_len: usize) -> String {
     }
 }
 
+fn extract_full_content(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => {
+            let mut parts: Vec<String> = Vec::new();
+            for item in arr {
+                if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    if let Some(s) = item.get("text").and_then(|t| t.as_str()) {
+                        parts.push(s.to_string());
+                    }
+                } else if let Some(s) = item.get("content").and_then(|c| c.as_str()) {
+                    parts.push(s.to_string());
+                }
+            }
+            if parts.is_empty() {
+                serde_json::to_string_pretty(value).unwrap_or_default()
+            } else {
+                parts.join("\n")
+            }
+        }
+        _ => serde_json::to_string_pretty(value).unwrap_or_default(),
+    }
+}
+
+fn extract_tool_source(tool_name: &str, input: Option<&serde_json::Value>) -> Option<String> {
+    let input = input?;
+    let obj = input.as_object()?;
+
+    // Try common field names for source identifiers
+    let source = match tool_name {
+        // File tools: Read, Write, Edit, etc.
+        n if n.contains("Read") || n.contains("read") => {
+            obj.get("file_path").or_else(|| obj.get("path")).and_then(|v| v.as_str())
+        }
+        n if n.contains("Write") || n.contains("write") || n.contains("Edit") || n.contains("edit") => {
+            obj.get("file_path").or_else(|| obj.get("path")).and_then(|v| v.as_str())
+        }
+        // Bash/shell tools
+        n if n.contains("Bash") || n.contains("bash") || n.contains("Terminal") || n.contains("terminal") => {
+            obj.get("command").or_else(|| obj.get("cmd")).and_then(|v| v.as_str())
+        }
+        // Web/fetch tools
+        n if n.contains("Fetch") || n.contains("fetch") || n.contains("Web") || n.contains("web") || n.contains("Browse") || n.contains("browse") => {
+            obj.get("url").or_else(|| obj.get("uri")).and_then(|v| v.as_str())
+        }
+        // Glob/Grep/search tools
+        n if n.contains("Glob") || n.contains("glob") => {
+            obj.get("pattern").and_then(|v| v.as_str())
+        }
+        n if n.contains("Grep") || n.contains("grep") || n.contains("Search") || n.contains("search") => {
+            obj.get("pattern").or_else(|| obj.get("query")).and_then(|v| v.as_str())
+        }
+        // Fallback: try common keys
+        _ => {
+            obj.get("file_path")
+                .or_else(|| obj.get("path"))
+                .or_else(|| obj.get("url"))
+                .or_else(|| obj.get("command"))
+                .and_then(|v| v.as_str())
+        }
+    };
+
+    // Truncate long sources (e.g. commands)
+    source.map(|s| {
+        if s.len() > 120 {
+            format!("{}...", &s[..117])
+        } else {
+            s.to_string()
+        }
+    })
+}
+
 fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
-    // Step A: Build tool_use_id → tool_name map
-    let mut tool_use_map: HashMap<String, String> = HashMap::new();
+    // Step A: Build tool_use_id → (tool_name, source) map
+    let mut tool_use_map: HashMap<String, (String, Option<String>)> = HashMap::new();
     for msg in messages {
         let inner = match msg.message.as_ref() {
             Some(m) => m,
@@ -273,7 +345,8 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
                         block.get("id").and_then(|v| v.as_str()),
                         block.get("name").and_then(|v| v.as_str()),
                     ) {
-                        tool_use_map.insert(id.to_string(), name.to_string());
+                        let source = extract_tool_source(name, block.get("input"));
+                        tool_use_map.insert(id.to_string(), (name.to_string(), source));
                     }
                 }
             }
@@ -285,8 +358,10 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
         category: String,
         subcategory: Option<String>,
         tool_name: Option<String>,
+        source: Option<String>,
         byte_size: u64,
         preview: String,
+        full_content: String,
         turn_index: u32,
     }
 
@@ -315,8 +390,10 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
                     category: category.to_string(),
                     subcategory: None,
                     tool_name: None,
+                    source: None,
                     byte_size: s.len() as u64,
                     preview: extract_preview(content, 80),
+                    full_content: s.clone(),
                     turn_index,
                 });
             }
@@ -331,7 +408,10 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
                                 .get("tool_use_id")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
-                            let tool_name = tool_use_map.get(tool_use_id).cloned();
+                            let (tool_name, source) = tool_use_map
+                                .get(tool_use_id)
+                                .map(|(n, s)| (Some(n.clone()), s.clone()))
+                                .unwrap_or((None, None));
                             let (cat, subcat) = tool_name
                                 .as_deref()
                                 .map(classify_tool)
@@ -342,8 +422,10 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
                                 category: cat.to_string(),
                                 subcategory: subcat,
                                 tool_name,
+                                source,
                                 byte_size,
                                 preview: extract_preview(result_content, 80),
+                                full_content: extract_full_content(result_content),
                                 turn_index,
                             });
                         }
@@ -353,22 +435,23 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("unknown");
                             let (cat, subcat) = classify_tool(name);
+                            let source = extract_tool_source(name, block.get("input"));
                             // Only measure input for file-writing tools
                             if cat == "File Edits" {
                                 let input_bytes = block
                                     .get("input")
                                     .map(measure_content_bytes)
                                     .unwrap_or(0);
+                                let input_val = block.get("input").unwrap_or(block);
                                 if input_bytes > 0 {
                                     blocks.push(BlockInfo {
                                         category: cat.to_string(),
                                         subcategory: subcat,
                                         tool_name: Some(name.to_string()),
+                                        source,
                                         byte_size: input_bytes,
-                                        preview: extract_preview(
-                                            block.get("input").unwrap_or(block),
-                                            80,
-                                        ),
+                                        preview: extract_preview(input_val, 80),
+                                        full_content: extract_full_content(input_val),
                                         turn_index,
                                     });
                                 }
@@ -379,8 +462,10 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
                                 category: "Thinking".to_string(),
                                 subcategory: None,
                                 tool_name: None,
+                                source: None,
                                 byte_size,
                                 preview: extract_preview(block, 80),
+                                full_content: extract_full_content(block),
                                 turn_index,
                             });
                         }
@@ -394,8 +479,10 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
                                 category: category.to_string(),
                                 subcategory: None,
                                 tool_name: None,
+                                source: None,
                                 byte_size,
                                 preview: extract_preview(block, 80),
+                                full_content: extract_full_content(block),
                                 turn_index,
                             });
                         }
@@ -465,8 +552,10 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
             ContentItem {
                 category: b.category.clone(),
                 tool_name: b.tool_name.clone(),
+                source: b.source.clone(),
                 estimated_tokens: b.byte_size / 4,
                 preview: b.preview.clone(),
+                full_content: b.full_content.clone(),
                 turn_index: b.turn_index,
             }
         })

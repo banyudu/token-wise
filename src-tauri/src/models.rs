@@ -100,8 +100,10 @@ pub struct ContentCategory {
 pub struct ContentItem {
     pub category: String,
     pub tool_name: Option<String>,
+    pub source: Option<String>,
     pub estimated_tokens: u64,
     pub preview: String,
+    pub full_content: String,
     pub turn_index: u32,
 }
 

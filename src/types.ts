@@ -88,8 +88,10 @@ export interface ContentCategory {
 export interface ContentItem {
   category: string;
   tool_name: string | null;
+  source: string | null;
   estimated_tokens: number;
   preview: string;
+  full_content: string;
   turn_index: number;
 }
 
