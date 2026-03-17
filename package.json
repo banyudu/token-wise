@@ -23,6 +23,7 @@
     "framer-motion": "^12.36.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "shiki": "^4.0.2",
     "tailwindcss": "^4.2.1"
   },
   "devDependencies": {

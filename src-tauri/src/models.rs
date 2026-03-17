@@ -87,9 +87,39 @@ pub struct TurnMetrics {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentCategory {
+    pub category: String,
+    pub subcategory: Option<String>,
+    pub estimated_tokens: u64,
+    pub byte_size: u64,
+    pub count: u32,
+    pub percentage: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentItem {
+    pub category: String,
+    pub tool_name: Option<String>,
+    pub source: Option<String>,
+    pub estimated_tokens: u64,
+    pub preview: String,
+    pub full_content: String,
+    pub turn_index: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentAnalysis {
+    pub categories: Vec<ContentCategory>,
+    pub total_estimated_tokens: u64,
+    pub top_items: Vec<ContentItem>,
+    pub suggestions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDetail {
     pub summary: SessionSummary,
     pub turns: Vec<TurnMetrics>,
+    pub content_analysis: Option<ContentAnalysis>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
