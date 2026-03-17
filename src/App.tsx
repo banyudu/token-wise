@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
 import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem } from "./types";
 import { codeToHtml } from "shiki";
+import ReactMarkdown from "react-markdown";
 import { LoadingScreen } from "./LoadingScreen";
 
 import "./App.css";
@@ -726,13 +727,18 @@ function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary
 
 function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
   if (turns.length === 0) return null;
-  const [mode, setMode] = useState<"per-turn" | "cumulative" | "cost">("per-turn");
+  const [mode, setMode] = useState<"per-turn" | "cumulative" | "cost" | "cumulative-cost">("per-turn");
 
   const perTurnTotals = turns.map((t) => t.input_tokens + t.cache_write_tokens + t.cache_read_tokens);
   const maxPerTurn = Math.max(...perTurnTotals, 1);
   const maxCumulative = Math.max(...turns.map((t) => t.cumulative_context), 1);
   const maxCost = Math.max(...turns.map((t) => t.cost_usd), 0.000001);
   const totalCost = turns.reduce((sum, t) => sum + t.cost_usd, 0);
+  const cumulativeCosts = useMemo(() => {
+    let sum = 0;
+    return turns.map((t) => { sum += t.cost_usd; return sum; });
+  }, [turns]);
+  const maxCumulativeCost = Math.max(cumulativeCosts[cumulativeCosts.length - 1] ?? 0, 0.000001);
 
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -793,6 +799,12 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
           >
             Cost
           </button>
+          <button
+            className={`border-none px-2 py-0.5 text-[11px] font-medium cursor-pointer rounded font-[inherit] transition-all duration-150 ${mode === "cumulative-cost" ? "bg-[var(--color-surface)] text-[var(--color-output)] shadow-sm" : "bg-transparent text-[var(--color-muted)]"}`}
+            onClick={() => setMode("cumulative-cost")}
+          >
+            Cum. Cost
+          </button>
         </div>
       </div>
       {/* Cumulative line overlay */}
@@ -810,21 +822,41 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
           <span>Max per turn: {formatCost(maxCost)}</span>
         </div>
       )}
-      <div ref={containerRef} className="overflow-x-auto" onWheel={handleWheel}>
+      {mode === "cumulative-cost" && (
+        <div className="flex items-center gap-1.5 text-[11px] text-[var(--color-muted)] mb-2">
+          <span>Total cost: {formatCost(totalCost)}</span>
+        </div>
+      )}
+      {(() => {
+        const isCost = mode === "cost" || mode === "cumulative-cost";
+        const yMax = mode === "cost" ? maxCost : mode === "cumulative-cost" ? maxCumulativeCost : mode === "cumulative" ? maxCumulative : maxPerTurn;
+        const tickCount = 4;
+        const yTicks = Array.from({ length: tickCount + 1 }, (_, i) => (yMax / tickCount) * (tickCount - i));
+        const formatTick = (v: number) => isCost ? formatCost(v) : formatTokens(v);
+        return (
+      <div className="flex">
+        <div className="flex flex-col justify-between h-[160px] pr-2 shrink-0" style={{ width: isCost ? 52 : 48 }}>
+          {yTicks.map((v, i) => (
+            <span key={i} className="text-[9px] text-[var(--color-muted)] text-right leading-none">{formatTick(v)}</span>
+          ))}
+        </div>
+        <div ref={containerRef} className="overflow-x-auto flex-1 min-w-0" onWheel={handleWheel}>
         <div className="flex gap-px" style={{ width: zoom > 1 ? `${zoom * 100}%` : undefined }}>
           {turns.map((t) => {
             const perTurnTotal = t.input_tokens + t.cache_write_tokens + t.cache_read_tokens;
             const heightPct = mode === "cost"
               ? (t.cost_usd / maxCost) * 100
-              : mode === "per-turn"
-                ? (perTurnTotal / maxPerTurn) * 100
-                : (t.cumulative_context / maxCumulative) * 100;
+              : mode === "cumulative-cost"
+                ? (cumulativeCosts[t.turn_index] / maxCumulativeCost) * 100
+                : mode === "per-turn"
+                  ? (perTurnTotal / maxPerTurn) * 100
+                  : (t.cumulative_context / maxCumulative) * 100;
             const showLabel = t.turn_index === 0 || ((t.turn_index + 1) % labelInterval === 0) || t.turn_index === turns.length - 1;
             return (
-              <div key={`${mode}-${t.turn_index}`} className="flex-1 flex flex-col items-center min-w-0" title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)}, cache hit ${formatPercent(t.cache_hit_rate)}`}>
+              <div key={`${mode}-${t.turn_index}`} className="flex-1 flex flex-col items-center min-w-0" title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)} (cum: ${formatCost(cumulativeCosts[t.turn_index])}), cache hit ${formatPercent(t.cache_hit_rate)}`}>
                 <div className="w-full h-[160px] flex flex-col justify-end">
                   <div className="w-full flex flex-col rounded-t-sm overflow-hidden" style={{ height: `${Math.max(heightPct, 0.5)}%` }}>
-                    {mode === "cost" ? (
+                    {(mode === "cost" || mode === "cumulative-cost") ? (
                       <div className="w-full h-full" style={{ backgroundColor: "var(--color-output)" }} />
                     ) : perTurnTotal > 0 ? (<>
                       <div className="w-full" style={{ flex: t.cache_write_tokens, backgroundColor: "var(--color-cache-write)" }} />
@@ -839,9 +871,12 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
           })}
         </div>
       </div>
+      </div>
+        );
+      })()}
       <div className="flex flex-wrap gap-3 mt-2">
-        {mode === "cost" ? (
-          <div className="flex items-center gap-1.5 text-xs"><span className="w-2.5 h-2.5 rounded-sm shrink-0 bg-[var(--color-output)]" /><span>Cost per turn</span></div>
+        {mode === "cost" || mode === "cumulative-cost" ? (
+          <div className="flex items-center gap-1.5 text-xs"><span className="w-2.5 h-2.5 rounded-sm shrink-0 bg-[var(--color-output)]" /><span>{mode === "cumulative-cost" ? "Cumulative cost" : "Cost per turn"}</span></div>
         ) : (<>
           <div className="flex items-center gap-1.5 text-xs"><span className="w-2.5 h-2.5 rounded-sm shrink-0 bg-[var(--color-cache-write)]" /><span>Cache Write</span></div>
           <div className="flex items-center gap-1.5 text-xs"><span className="w-2.5 h-2.5 rounded-sm shrink-0 bg-[var(--color-input)]" /><span>Input</span></div>
@@ -995,10 +1030,113 @@ function useShikiHtml(code: string, lang: string) {
   return { ref, ready };
 }
 
+function looksLikeMarkdown(text: string): boolean {
+  const mdPatterns = /^#{1,6}\s|^\*\*.*\*\*|^\d+\.\s|^[-*+]\s|^```|^\|.*\|/m;
+  return mdPatterns.test(text);
+}
+
+function extractThinking(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed?.type === "thinking" && typeof parsed.thinking === "string") {
+      return parsed.thinking;
+    }
+  } catch { /* not JSON */ }
+  return null;
+}
+
+function extractJsonText(content: string): string | null {
+  try {
+    const parsed = JSON.parse(content);
+    if (typeof parsed?.text === "string") return parsed.text;
+  } catch { /* not JSON */ }
+  return null;
+}
+
+interface FileEditInfo {
+  file_path: string;
+  old_string: string;
+  new_string: string;
+}
+
+function extractFileEdit(content: string): FileEditInfo | null {
+  try {
+    const parsed = JSON.parse(content);
+    if (typeof parsed?.old_string === "string" && typeof parsed?.new_string === "string") {
+      return { file_path: parsed.file_path ?? "", old_string: parsed.old_string, new_string: parsed.new_string };
+    }
+  } catch { /* not JSON */ }
+  return null;
+}
+
+function computeLineDiff(oldStr: string, newStr: string): { type: "ctx" | "del" | "add"; text: string }[] {
+  const oldLines = oldStr.split("\n");
+  const newLines = newStr.split("\n");
+
+  // Simple LCS-based line diff
+  const m = oldLines.length, n = newLines.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = oldLines[i - 1] === newLines[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+
+  const result: { type: "ctx" | "del" | "add"; text: string }[] = [];
+  let i = m, j = n;
+  const stack: { type: "ctx" | "del" | "add"; text: string }[] = [];
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      stack.push({ type: "ctx", text: oldLines[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      stack.push({ type: "add", text: newLines[j - 1] });
+      j--;
+    } else {
+      stack.push({ type: "del", text: oldLines[i - 1] });
+      i--;
+    }
+  }
+  stack.reverse();
+  result.push(...stack);
+  return result;
+}
+
+function DiffView({ edit }: { edit: FileEditInfo }) {
+  const lines = useMemo(() => computeLineDiff(edit.old_string, edit.new_string), [edit.old_string, edit.new_string]);
+  return (
+    <pre className="text-[13px] leading-relaxed m-0 p-4 font-mono overflow-x-auto">
+      {lines.map((line, i) => (
+        <div
+          key={i}
+          className={
+            line.type === "del" ? "bg-[rgba(231,76,60,0.12)] text-[#e74c3c]" :
+            line.type === "add" ? "bg-[rgba(39,174,96,0.12)] text-[#27ae60]" :
+            "text-[var(--color-text)]"
+          }
+        >
+          <span className="inline-block w-5 text-right mr-2 select-none opacity-50">
+            {line.type === "del" ? "-" : line.type === "add" ? "+" : " "}
+          </span>
+          {line.text}
+        </div>
+      ))}
+    </pre>
+  );
+}
+
 function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => void }) {
   const lang = useMemo(() => detectLang(item.source, item.category), [item.source, item.category]);
-  const code = useMemo(() => stripAnsiCodes(stripLineNumbers(item.full_content)), [item.full_content]);
-  const { ref: codeRef, ready } = useShikiHtml(code, lang);
+  const rawCode = useMemo(() => stripAnsiCodes(stripLineNumbers(item.full_content)), [item.full_content]);
+  const thinking = useMemo(() => extractThinking(rawCode), [rawCode]);
+  const fileEdit = useMemo(() => item.category === "File Edits" ? extractFileEdit(rawCode) : null, [rawCode, item.category]);
+  const jsonText = useMemo(() => extractJsonText(rawCode), [rawCode]);
+  const code = thinking ?? jsonText ?? rawCode;
+  const isMarkdown = useMemo(() => !fileEdit && (lang === "markdown" || ((lang === "text" || thinking) && looksLikeMarkdown(code))), [lang, code, thinking, fileEdit]);
+  const { ref: codeRef, ready } = useShikiHtml(code, isMarkdown ? "text" : lang);
+
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
@@ -1010,7 +1148,7 @@ function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => vo
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-sm font-semibold shrink-0">Content Preview</span>
             {item.source && <span className="text-[12px] text-[var(--color-muted)] truncate" title={item.source}>{item.source}</span>}
-            <span className="text-[11px] px-1.5 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)] shrink-0">{lang}</span>
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)] shrink-0">{fileEdit ? "diff" : thinking ? "thinking" : isMarkdown ? "markdown" : lang}</span>
           </div>
           <button
             className="bg-none border-none text-[var(--color-muted)] cursor-pointer text-lg leading-none hover:text-[var(--color-text)] ml-3 shrink-0"
@@ -1018,13 +1156,23 @@ function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => vo
           >&times;</button>
         </div>
         <div className="overflow-auto flex-1 preview-dialog-content">
-          <div
-            ref={codeRef}
-            className="text-[13px] leading-relaxed [&_pre]:!m-0 [&_pre]:!p-4 [&_pre]:!rounded-none [&_code]:!text-[13px]"
-            style={{ display: ready ? undefined : "none" }}
-          />
-          {!ready && (
-            <pre className="text-[13px] whitespace-pre-wrap break-words m-0 p-4 text-[var(--color-text)] font-mono">{code}</pre>
+          {fileEdit ? (
+            <DiffView edit={fileEdit} />
+          ) : isMarkdown ? (
+            <div className="p-4 text-[13px] leading-relaxed text-[var(--color-text)] prose prose-sm prose-invert max-w-none [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_h1]:font-bold [&_h2]:font-semibold [&_h3]:font-semibold [&_code]:text-[12px] [&_code]:bg-[rgba(74,144,217,0.1)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre]:bg-[rgba(0,0,0,0.2)] [&_pre]:rounded-md [&_pre]:p-3 [&_a]:text-[var(--color-primary)] [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--color-border)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--color-muted)] [&_table]:border-collapse [&_th]:border [&_th]:border-[var(--color-border)] [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-[var(--color-border)] [&_td]:px-2 [&_td]:py-1">
+              <ReactMarkdown>{code}</ReactMarkdown>
+            </div>
+          ) : (
+            <>
+              <div
+                ref={codeRef}
+                className="text-[13px] leading-relaxed [&_pre]:!m-0 [&_pre]:!p-4 [&_pre]:!rounded-none [&_code]:!text-[13px]"
+                style={{ display: ready ? undefined : "none" }}
+              />
+              {!ready && (
+                <pre className="text-[13px] whitespace-pre-wrap break-words m-0 p-4 text-[var(--color-text)] font-mono">{code}</pre>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1035,6 +1183,7 @@ function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => vo
 function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
   const [showTopItems, setShowTopItems] = useState(false);
   const [previewItem, setPreviewItem] = useState<ContentItem | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
 
   // Merge categories by category name for the legend
   const mergedCategories = useMemo(() => {
@@ -1075,7 +1224,7 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
               </thead>
               <tbody>
                 {mergedCategories.map((c) => (
-                  <tr key={c.name} className="hover:bg-[rgba(74,144,217,0.05)]">
+                  <tr key={c.name} className={`hover:bg-[rgba(74,144,217,0.05)] cursor-pointer ${categoryFilter === c.name ? "bg-[rgba(74,144,217,0.08)]" : ""}`} onClick={() => { setCategoryFilter(prev => prev === c.name ? null : c.name); setShowTopItems(true); }}>
                     <td className={tdBase}>
                       <span className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle" style={{ backgroundColor: CATEGORY_COLORS[c.name] || "#BDC3C7" }} />
                       {c.name}
@@ -1113,14 +1262,27 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
         </div>
 
         {/* Top items (collapsible) */}
-        {analysis.top_items.length > 0 && (
+        {analysis.all_items.length > 0 && (() => {
+          const filteredItems = categoryFilter
+            ? analysis.all_items.filter(item => item.category === categoryFilter).slice(0, 10)
+            : analysis.all_items.slice(0, 10);
+          return (
           <div className="mt-4 pt-4 border-t border-[var(--color-border)]">
-            <button
-              className="bg-none border-none text-[13px] font-semibold cursor-pointer text-[var(--color-primary)] p-0 hover:underline"
-              onClick={() => setShowTopItems(!showTopItems)}
-            >
-              {showTopItems ? "\u25BC" : "\u25B6"} Top {analysis.top_items.length} Largest Content Blocks
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                className="bg-none border-none text-[13px] font-semibold cursor-pointer text-[var(--color-primary)] p-0 hover:underline"
+                onClick={() => setShowTopItems(!showTopItems)}
+              >
+                {showTopItems ? "\u25BC" : "\u25B6"} Top {filteredItems.length} Largest Content Blocks
+              </button>
+              {categoryFilter && (
+                <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-[rgba(74,144,217,0.12)] text-[var(--color-primary)] border border-[rgba(74,144,217,0.25)]">
+                  <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: CATEGORY_COLORS[categoryFilter] || "#BDC3C7" }} />
+                  {categoryFilter}
+                  <button className="bg-none border-none text-[var(--color-primary)] cursor-pointer p-0 ml-0.5 text-[13px] leading-none hover:text-[var(--color-text)]" onClick={() => setCategoryFilter(null)}>&times;</button>
+                </span>
+              )}
+            </div>
             {showTopItems && (
               <table className="w-full border-collapse text-[12px] mt-2">
                 <thead className="border-b border-[var(--color-border)]">
@@ -1134,7 +1296,7 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {analysis.top_items.map((item, i) => (
+                  {filteredItems.map((item, i) => (
                     <tr key={i} className="hover:bg-[rgba(74,144,217,0.05)]">
                       <td className={tdBase}>{item.turn_index + 1}</td>
                       <td className={tdBase}>
@@ -1159,7 +1321,8 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
             )}
             {previewItem && <PreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />}
           </div>
-        )}
+          );
+        })()}
 
         {/* Suggestions */}
         {analysis.suggestions.length > 0 && (
@@ -1174,6 +1337,96 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function TurnByTurnTable({ turns, maxTurnCost, contentItems }: { turns: TurnMetrics[]; maxTurnCost: number; contentItems: ContentItem[] }) {
+  const [expandedTurn, setExpandedTurn] = useState<number | null>(null);
+
+  const itemsByTurn = useMemo(() => {
+    const map = new Map<number, ContentItem[]>();
+    for (const item of contentItems) {
+      const list = map.get(item.turn_index) ?? [];
+      list.push(item);
+      map.set(item.turn_index, list);
+    }
+    return map;
+  }, [contentItems]);
+
+  return (
+    <div className="mb-6">
+      <h3 className="text-sm font-semibold mb-3 sticky top-0 bg-[var(--color-surface)] py-2 z-10">Turn-by-Turn Metrics</h3>
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg overflow-x-auto">
+        <table className="w-full border-collapse text-[13px]">
+          <thead className="border-b border-[var(--color-border)]">
+            <tr>
+              <th className={thBase}>#</th><th className={thBase}>Input</th><th className={thBase}>Output</th><th className={thBase}>Cache Write</th><th className={thBase}>Cache Read</th><th className={thBase}>Cache Hit</th><th className={thBase}>Cumulative</th><th className={thBase}>Cost</th><th className={thBase}>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {turns.map((t) => {
+              const isExpanded = expandedTurn === t.turn_index;
+              const turnItems = itemsByTurn.get(t.turn_index);
+              return (
+                <Fragment key={t.turn_index}>
+                  <tr
+                    className={`cursor-pointer hover:bg-[rgba(74,144,217,0.05)] ${t.cache_hit_rate < 0.3 ? "bg-[rgba(231,76,60,0.04)]" : ""} ${isExpanded ? "bg-[rgba(74,144,217,0.06)]" : ""}`}
+                    onClick={() => setExpandedTurn(isExpanded ? null : t.turn_index)}
+                  >
+                    <td className={tdBase}>
+                      {t.turn_index + 1}
+                    </td>
+                    <td className={tdBase}>{formatTokens(t.input_tokens)}</td>
+                    <td className={tdBase}>{formatTokens(t.output_tokens)}</td>
+                    <td className={tdBase}>{formatTokens(t.cache_write_tokens)}</td>
+                    <td className={tdBase}>{formatTokens(t.cache_read_tokens)}</td>
+                    <td className={tdBase}>{formatPercent(t.cache_hit_rate)}</td>
+                    <td className={tdBase}>{formatTokens(t.cumulative_context)}</td>
+                    <td className={`${tdBase} font-semibold`} style={{ color: costColor(t.cost_usd, maxTurnCost) }}>{formatCost(t.cost_usd)}</td>
+                    <td className={tdBase}>{t.timestamp ? formatDate(t.timestamp) : "\u2014"}</td>
+                  </tr>
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={9} className="p-0">
+                        <div className="bg-[rgba(74,144,217,0.03)] border-t border-b border-[var(--color-border)] px-6 py-2">
+                          {turnItems && turnItems.length > 0 ? (
+                            <table className="w-full border-collapse text-[12px]">
+                              <thead>
+                                <tr>
+                                  <th className="text-left py-1 px-2 text-[10px] uppercase tracking-wide text-[var(--color-muted)] font-semibold">Category</th>
+                                  <th className="text-left py-1 px-2 text-[10px] uppercase tracking-wide text-[var(--color-muted)] font-semibold">Tool</th>
+                                  <th className="text-left py-1 px-2 text-[10px] uppercase tracking-wide text-[var(--color-muted)] font-semibold">Source / Preview</th>
+                                  <th className="text-left py-1 px-2 text-[10px] uppercase tracking-wide text-[var(--color-muted)] font-semibold">Est. Tokens</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {turnItems.map((item, i) => (
+                                  <tr key={i} className="hover:bg-[rgba(74,144,217,0.05)]">
+                                    <td className="py-1 px-2 whitespace-nowrap">
+                                      <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ backgroundColor: CATEGORY_COLORS[item.category] || "#BDC3C7" }} />
+                                      {item.category}
+                                    </td>
+                                    <td className="py-1 px-2 whitespace-nowrap">{item.tool_name ?? "\u2014"}</td>
+                                    <td className="py-1 px-2 max-w-[400px] truncate" title={item.source ?? item.preview}>{item.source ?? item.preview}</td>
+                                    <td className="py-1 px-2 whitespace-nowrap">{formatTokens(item.estimated_tokens)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          ) : (
+                            <div className="text-[12px] text-[var(--color-muted)] py-1">No content details available for this turn.</div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1207,33 +1460,7 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
       </div>
       {detail.content_analysis && <ContentAnalysisView analysis={detail.content_analysis} />}
       <ContextGrowthChart turns={turns} />
-      <div className="mb-6">
-        <h3 className="text-sm font-semibold mb-3">Turn-by-Turn Metrics</h3>
-        <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
-            <thead className="border-b border-[var(--color-border)]">
-              <tr>
-                <th className={thBase}>#</th><th className={thBase}>Input</th><th className={thBase}>Output</th><th className={thBase}>Cache Write</th><th className={thBase}>Cache Read</th><th className={thBase}>Cache Hit</th><th className={thBase}>Cumulative</th><th className={thBase}>Cost</th><th className={thBase}>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {turns.map((t) => (
-                <tr key={t.turn_index} className={`hover:bg-[rgba(74,144,217,0.05)] ${t.cache_hit_rate < 0.3 ? "bg-[rgba(231,76,60,0.04)]" : ""}`}>
-                  <td className={tdBase}>{t.turn_index + 1}</td>
-                  <td className={tdBase}>{formatTokens(t.input_tokens)}</td>
-                  <td className={tdBase}>{formatTokens(t.output_tokens)}</td>
-                  <td className={tdBase}>{formatTokens(t.cache_write_tokens)}</td>
-                  <td className={tdBase}>{formatTokens(t.cache_read_tokens)}</td>
-                  <td className={tdBase}>{formatPercent(t.cache_hit_rate)}</td>
-                  <td className={tdBase}>{formatTokens(t.cumulative_context)}</td>
-                  <td className={`${tdBase} font-semibold`} style={{ color: costColor(t.cost_usd, maxTurnCost) }}>{formatCost(t.cost_usd)}</td>
-                  <td className={tdBase}>{t.timestamp ? formatDate(t.timestamp) : "\u2014"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <TurnByTurnTable turns={turns} maxTurnCost={maxTurnCost} contentItems={detail.content_analysis?.all_items ?? []} />
     </div>
   );
 }
