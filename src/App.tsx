@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1342,6 +1342,96 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
   );
 }
 
+function TurnByTurnTable({ turns, maxTurnCost, contentItems }: { turns: TurnMetrics[]; maxTurnCost: number; contentItems: ContentItem[] }) {
+  const [expandedTurn, setExpandedTurn] = useState<number | null>(null);
+
+  const itemsByTurn = useMemo(() => {
+    const map = new Map<number, ContentItem[]>();
+    for (const item of contentItems) {
+      const list = map.get(item.turn_index) ?? [];
+      list.push(item);
+      map.set(item.turn_index, list);
+    }
+    return map;
+  }, [contentItems]);
+
+  return (
+    <div className="mb-6">
+      <h3 className="text-sm font-semibold mb-3 sticky top-0 bg-[var(--color-surface)] py-2 z-10">Turn-by-Turn Metrics</h3>
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg overflow-x-auto">
+        <table className="w-full border-collapse text-[13px]">
+          <thead className="border-b border-[var(--color-border)]">
+            <tr>
+              <th className={thBase}>#</th><th className={thBase}>Input</th><th className={thBase}>Output</th><th className={thBase}>Cache Write</th><th className={thBase}>Cache Read</th><th className={thBase}>Cache Hit</th><th className={thBase}>Cumulative</th><th className={thBase}>Cost</th><th className={thBase}>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {turns.map((t) => {
+              const isExpanded = expandedTurn === t.turn_index;
+              const turnItems = itemsByTurn.get(t.turn_index);
+              return (
+                <Fragment key={t.turn_index}>
+                  <tr
+                    className={`cursor-pointer hover:bg-[rgba(74,144,217,0.05)] ${t.cache_hit_rate < 0.3 ? "bg-[rgba(231,76,60,0.04)]" : ""} ${isExpanded ? "bg-[rgba(74,144,217,0.06)]" : ""}`}
+                    onClick={() => setExpandedTurn(isExpanded ? null : t.turn_index)}
+                  >
+                    <td className={tdBase}>
+                      {t.turn_index + 1}
+                    </td>
+                    <td className={tdBase}>{formatTokens(t.input_tokens)}</td>
+                    <td className={tdBase}>{formatTokens(t.output_tokens)}</td>
+                    <td className={tdBase}>{formatTokens(t.cache_write_tokens)}</td>
+                    <td className={tdBase}>{formatTokens(t.cache_read_tokens)}</td>
+                    <td className={tdBase}>{formatPercent(t.cache_hit_rate)}</td>
+                    <td className={tdBase}>{formatTokens(t.cumulative_context)}</td>
+                    <td className={`${tdBase} font-semibold`} style={{ color: costColor(t.cost_usd, maxTurnCost) }}>{formatCost(t.cost_usd)}</td>
+                    <td className={tdBase}>{t.timestamp ? formatDate(t.timestamp) : "\u2014"}</td>
+                  </tr>
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={9} className="p-0">
+                        <div className="bg-[rgba(74,144,217,0.03)] border-t border-b border-[var(--color-border)] px-6 py-2">
+                          {turnItems && turnItems.length > 0 ? (
+                            <table className="w-full border-collapse text-[12px]">
+                              <thead>
+                                <tr>
+                                  <th className="text-left py-1 px-2 text-[10px] uppercase tracking-wide text-[var(--color-muted)] font-semibold">Category</th>
+                                  <th className="text-left py-1 px-2 text-[10px] uppercase tracking-wide text-[var(--color-muted)] font-semibold">Tool</th>
+                                  <th className="text-left py-1 px-2 text-[10px] uppercase tracking-wide text-[var(--color-muted)] font-semibold">Source / Preview</th>
+                                  <th className="text-left py-1 px-2 text-[10px] uppercase tracking-wide text-[var(--color-muted)] font-semibold">Est. Tokens</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {turnItems.map((item, i) => (
+                                  <tr key={i} className="hover:bg-[rgba(74,144,217,0.05)]">
+                                    <td className="py-1 px-2 whitespace-nowrap">
+                                      <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ backgroundColor: CATEGORY_COLORS[item.category] || "#BDC3C7" }} />
+                                      {item.category}
+                                    </td>
+                                    <td className="py-1 px-2 whitespace-nowrap">{item.tool_name ?? "\u2014"}</td>
+                                    <td className="py-1 px-2 max-w-[400px] truncate" title={item.source ?? item.preview}>{item.source ?? item.preview}</td>
+                                    <td className="py-1 px-2 whitespace-nowrap">{formatTokens(item.estimated_tokens)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          ) : (
+                            <div className="text-[12px] text-[var(--color-muted)] py-1">No content details available for this turn.</div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: () => void }) {
   const { summary, turns } = detail;
   const firstTurnCacheWrite = turns.length > 0 ? turns[0].cache_write_tokens : 0;
@@ -1370,33 +1460,7 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
       </div>
       {detail.content_analysis && <ContentAnalysisView analysis={detail.content_analysis} />}
       <ContextGrowthChart turns={turns} />
-      <div className="mb-6">
-        <h3 className="text-sm font-semibold mb-3 sticky top-0 bg-[var(--color-surface)] py-2 z-10">Turn-by-Turn Metrics</h3>
-        <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
-            <thead className="border-b border-[var(--color-border)]">
-              <tr>
-                <th className={thBase}>#</th><th className={thBase}>Input</th><th className={thBase}>Output</th><th className={thBase}>Cache Write</th><th className={thBase}>Cache Read</th><th className={thBase}>Cache Hit</th><th className={thBase}>Cumulative</th><th className={thBase}>Cost</th><th className={thBase}>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {turns.map((t) => (
-                <tr key={t.turn_index} className={`hover:bg-[rgba(74,144,217,0.05)] ${t.cache_hit_rate < 0.3 ? "bg-[rgba(231,76,60,0.04)]" : ""}`}>
-                  <td className={tdBase}>{t.turn_index + 1}</td>
-                  <td className={tdBase}>{formatTokens(t.input_tokens)}</td>
-                  <td className={tdBase}>{formatTokens(t.output_tokens)}</td>
-                  <td className={tdBase}>{formatTokens(t.cache_write_tokens)}</td>
-                  <td className={tdBase}>{formatTokens(t.cache_read_tokens)}</td>
-                  <td className={tdBase}>{formatPercent(t.cache_hit_rate)}</td>
-                  <td className={tdBase}>{formatTokens(t.cumulative_context)}</td>
-                  <td className={`${tdBase} font-semibold`} style={{ color: costColor(t.cost_usd, maxTurnCost) }}>{formatCost(t.cost_usd)}</td>
-                  <td className={tdBase}>{t.timestamp ? formatDate(t.timestamp) : "\u2014"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <TurnByTurnTable turns={turns} maxTurnCost={maxTurnCost} contentItems={detail.content_analysis?.all_items ?? []} />
     </div>
   );
 }
