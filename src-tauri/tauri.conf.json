@@ -33,6 +33,7 @@
     ],
     "category": "DeveloperTool",
     "macOS": {
+      "signingIdentity": "Apple Distribution: Yudu Ban (RYLS8UDY5D)",
       "entitlements": "Entitlements.plist",
       "minimumSystemVersion": "12.0",
       "files": {
