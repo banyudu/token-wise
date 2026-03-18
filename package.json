@@ -1,7 +1,7 @@
 {
   "name": "token-wise",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,8 +11,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:dev:force": "snipe-port 5613 && tauri dev",
-    "tauri:build:mac": "tauri build --bundles app --target universal-apple-darwin",
-    "tauri:pkg:mac": "xcrun productbuild --sign \"${MAC_INSTALLER_IDENTITY:?}\" --component target/universal-apple-darwin/release/bundle/macos/token-wise.app /Applications token-wise.pkg",
+    "tauri:build:mac": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build --bundles app --target universal-apple-darwin",
+    "tauri:pkg:mac": "xcrun productbuild --sign \"${MAC_INSTALLER_IDENTITY:?}\" --component src-tauri/target/universal-apple-darwin/release/bundle/macos/token-wise.app /Applications token-wise.pkg",
     "tauri:upload:mac": "xcrun altool --upload-app --type macos --file token-wise.pkg --apiKey ${APPLE_API_KEY_ID:?} --apiIssuer ${APPLE_API_ISSUER:?}",
     "tauri:publish:mac": "pnpm tauri:build:mac && pnpm tauri:pkg:mac && pnpm tauri:upload:mac"
   },
@@ -32,7 +32,9 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "bumpp": "^11.0.1",
     "snipe-port": "^1.0.2",
+    "tauri-version": "^1.0.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
   }
