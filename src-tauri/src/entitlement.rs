@@ -36,6 +36,15 @@ pub async fn start_trial() -> trial::TrialStatus {
 
 #[tauri::command]
 pub async fn get_app_entitlement() -> AppEntitlement {
+    // In debug builds, skip entitlement checks
+    #[cfg(debug_assertions)]
+    {
+        return AppEntitlement {
+            state: "paid".to_string(),
+            trial_days_remaining: 0.0,
+        };
+    }
+
     // Check StoreKit entitlements first
     if let Ok(ent) = storekit::check_entitlements() {
         if ent.has_pro.unwrap_or(false) {

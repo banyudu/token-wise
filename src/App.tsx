@@ -1641,7 +1641,9 @@ function App() {
                   { label: "Sessions", value: overview.total_sessions.toString(), sub: (() => { const totalMs = pricedSessions.reduce((s, x) => s + getSessionDurationMs(x), 0); return totalMs > 0 ? `${formatDuration(totalMs)} total` : undefined; })() },
                   { label: "Cache Hit Rate", value: formatPercent(overview.avg_cache_hit_rate), sub: "higher is better" },
                   { label: "System Overhead", value: formatTokens(overview.estimated_system_overhead_tokens), sub: "per session (est.)" },
-                  { label: "Output Tokens", value: formatTokens(overview.total_output_tokens) },
+                  { label: "Input Tokens", value: formatTokens(overview.total_input_tokens), sub: `$${getModelPricing(model).input}/MTok` },
+                  { label: "Output Tokens", value: formatTokens(overview.total_output_tokens), sub: `$${getModelPricing(model).output}/MTok` },
+                  { label: "Cache Read Tokens", value: formatTokens(overview.total_cache_read_tokens), sub: `$${getModelPricing(model).cacheRead}/MTok` },
                   { label: "Cache Write Tokens", value: formatTokens(overview.total_cache_write_tokens), sub: `$${getModelPricing(model).cacheWrite}/MTok` },
                 ].map((card, i) => (
                   <motion.div
