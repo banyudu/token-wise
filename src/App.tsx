@@ -1053,6 +1053,72 @@ function extractJsonText(content: string): string | null {
   return null;
 }
 
+const RE_XML_DECL = /^<\?xml\s/i;
+const RE_OPEN_TAG = /^<[a-z][\w-]*[\s>]/i;
+const RE_CLOSE_TAG = /<\/[a-z][\w-]*\s*>/i;
+const RE_HTML_DOCTYPE = /^<!doctype\s+html/i;
+const RE_HTML_ROOT = /^<html[\s>]/i;
+const RE_HTML_TAGS = /<\/(head|body|div|span|p|a|table|form)>/i;
+const RE_YAML_FRONT = /^---\s*$/m;
+const RE_YAML_KV = /^[a-zA-Z_][\w.-]*:\s/m;
+const RE_YAML_LINE = /^\s*(#.*|[a-zA-Z_][\w.-]*:\s|[-]\s|$)/;
+const RE_TOML_SECTION = /^\[[\w.-]+\]\s*$/m;
+const RE_TOML_KV = /^[\w.-]+\s*=\s*/m;
+const RE_SQL_KW = /^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH|EXPLAIN)\s/im;
+const RE_CSS_RULE = /[.#@]?[\w-]+\s*\{[^}]*?:[^}]*?\}/s;
+const RE_JS_KW = /\bfunction\b|\breturn\b|\bconst\b|\blet\b|\bvar\b/;
+
+function detectContentLang(content: string): { lang: string; formatted: string } | null {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return { lang: "json", formatted: JSON.stringify(parsed, null, 2) };
+    } catch { /* not JSON, check JSONL below */ }
+
+    if (trimmed.includes("\n")) {
+      const lines = trimmed.split("\n").filter(l => l.trim());
+      if (lines.length > 0 && lines.every(l => { try { JSON.parse(l); return true; } catch { return false; } })) {
+        const formatted = lines.map(l => JSON.stringify(JSON.parse(l), null, 2)).join("\n---\n");
+        return { lang: "jsonl", formatted };
+      }
+    }
+  }
+
+  if (trimmed.startsWith("<")) {
+    if (RE_XML_DECL.test(trimmed) || (RE_OPEN_TAG.test(trimmed) && RE_CLOSE_TAG.test(trimmed))) {
+      const isHtml = RE_HTML_DOCTYPE.test(trimmed) || RE_HTML_ROOT.test(trimmed) || RE_HTML_TAGS.test(trimmed);
+      return { lang: isHtml ? "html" : "xml", formatted: trimmed };
+    }
+  }
+
+  if (trimmed.includes("\n")) {
+    const lines = trimmed.split("\n");
+    if (RE_YAML_FRONT.test(trimmed) || (RE_YAML_KV.test(trimmed) && !/[;{}]/.test(lines[0]))) {
+      const yamlLines = lines.filter(l => RE_YAML_LINE.test(l));
+      if (yamlLines.length / lines.length > 0.6) {
+        return { lang: "yaml", formatted: trimmed };
+      }
+    }
+  }
+
+  if (RE_TOML_SECTION.test(trimmed) && RE_TOML_KV.test(trimmed)) {
+    return { lang: "toml", formatted: trimmed };
+  }
+
+  if (RE_SQL_KW.test(trimmed)) {
+    return { lang: "sql", formatted: trimmed };
+  }
+
+  if (RE_CSS_RULE.test(trimmed) && !RE_JS_KW.test(trimmed)) {
+    return { lang: "css", formatted: trimmed };
+  }
+
+  return null;
+}
+
 interface FileEditInfo {
   file_path: string;
   old_string: string;
@@ -1123,15 +1189,50 @@ function DiffView({ edit }: { edit: FileEditInfo }) {
   );
 }
 
+function JsonlEntry({ index, json }: { index: number; json: string }) {
+  const [open, setOpen] = useState(false);
+  const { ref, ready } = useShikiHtml(json, "json");
+  return (
+    <div className="border-b border-[var(--color-border)] last:border-b-0">
+      <button
+        className="w-full flex items-center gap-2 px-4 py-2 text-left text-[13px] font-mono bg-none border-none cursor-pointer text-[var(--color-text)] hover:bg-[rgba(74,144,217,0.05)]"
+        onClick={() => setOpen(!open)}
+      >
+        <span className="text-[11px] text-[var(--color-muted)] select-none transition-transform" style={{ transform: open ? "rotate(90deg)" : undefined }}>&#9654;</span>
+        <span className="text-[var(--color-muted)]">#{index + 1}</span>
+        <span className="truncate opacity-60">{json.split("\n")[0]}</span>
+      </button>
+      {open && (
+        <>
+          <div ref={ref} className="text-[13px] leading-relaxed [&_pre]:!m-0 [&_pre]:!px-4 [&_pre]:!pb-3 [&_pre]:!pt-0 [&_pre]:!rounded-none [&_code]:!text-[13px]" style={{ display: ready ? undefined : "none" }} />
+          {!ready && <pre className="text-[13px] whitespace-pre-wrap break-words m-0 px-4 pb-3 text-[var(--color-text)] font-mono">{json}</pre>}
+        </>
+      )}
+    </div>
+  );
+}
+
+function JsonlView({ content }: { content: string }) {
+  const entries = useMemo(() => content.split("\n---\n"), [content]);
+  return (
+    <div>
+      {entries.map((json, i) => <JsonlEntry key={i} index={i} json={json} />)}
+    </div>
+  );
+}
+
 function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => void }) {
   const lang = useMemo(() => detectLang(item.source, item.category), [item.source, item.category]);
   const rawCode = useMemo(() => stripAnsiCodes(stripLineNumbers(item.full_content)), [item.full_content]);
   const thinking = useMemo(() => extractThinking(rawCode), [rawCode]);
   const fileEdit = useMemo(() => item.category === "File Edits" ? extractFileEdit(rawCode) : null, [rawCode, item.category]);
   const jsonText = useMemo(() => extractJsonText(rawCode), [rawCode]);
-  const code = thinking ?? jsonText ?? rawCode;
-  const isMarkdown = useMemo(() => !fileEdit && (lang === "markdown" || ((lang === "text" || thinking) && looksLikeMarkdown(code))), [lang, code, thinking, fileEdit]);
-  const { ref: codeRef, ready } = useShikiHtml(code, isMarkdown ? "text" : lang);
+  const detected = useMemo(() => !thinking && !jsonText ? detectContentLang(rawCode) : null, [rawCode, thinking, jsonText]);
+  const code = thinking ?? jsonText ?? detected?.formatted ?? rawCode;
+  const effectiveLang = detected?.lang ?? lang;
+  const isMarkdown = useMemo(() => !fileEdit && (effectiveLang === "markdown" || ((effectiveLang === "text" || thinking) && looksLikeMarkdown(code))), [effectiveLang, code, thinking, fileEdit]);
+  const shikiLang = isMarkdown ? "text" : effectiveLang === "jsonl" ? "json" : effectiveLang;
+  const { ref: codeRef, ready } = useShikiHtml(code, shikiLang);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -1148,7 +1249,7 @@ function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => vo
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-sm font-semibold shrink-0">Content Preview</span>
             {item.source && <span className="text-[12px] text-[var(--color-muted)] truncate" title={item.source}>{item.source}</span>}
-            <span className="text-[11px] px-1.5 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)] shrink-0">{fileEdit ? "diff" : thinking ? "thinking" : isMarkdown ? "markdown" : lang}</span>
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)] shrink-0">{fileEdit ? "diff" : thinking ? "thinking" : isMarkdown ? "markdown" : effectiveLang}</span>
           </div>
           <button
             className="bg-none border-none text-[var(--color-muted)] cursor-pointer text-lg leading-none hover:text-[var(--color-text)] ml-3 shrink-0"
@@ -1158,6 +1259,8 @@ function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => vo
         <div className="overflow-auto flex-1 preview-dialog-content">
           {fileEdit ? (
             <DiffView edit={fileEdit} />
+          ) : effectiveLang === "jsonl" ? (
+            <JsonlView content={code} />
           ) : isMarkdown ? (
             <div className="p-4 text-[13px] leading-relaxed text-[var(--color-text)] prose prose-sm prose-invert max-w-none [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_h1]:font-bold [&_h2]:font-semibold [&_h3]:font-semibold [&_code]:text-[12px] [&_code]:bg-[rgba(74,144,217,0.1)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre]:bg-[rgba(0,0,0,0.2)] [&_pre]:rounded-md [&_pre]:p-3 [&_a]:text-[var(--color-primary)] [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--color-border)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--color-muted)] [&_table]:border-collapse [&_th]:border [&_th]:border-[var(--color-border)] [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-[var(--color-border)] [&_td]:px-2 [&_td]:py-1">
               <ReactMarkdown>{code}</ReactMarkdown>
