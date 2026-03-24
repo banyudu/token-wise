@@ -1622,6 +1622,17 @@ function App() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === "r") {
+        e.preventDefault();
+        refreshData();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [refreshData]);
+
   const sessions = useMemo(() => filterByDateRange(allSessions, dateRange, customDateFrom, customDateTo), [allSessions, dateRange, customDateFrom, customDateTo]);
   const pricedSessions = useMemo(() => {
     const p = getModelPricing(model);
