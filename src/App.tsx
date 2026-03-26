@@ -853,7 +853,7 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
                   : (t.cumulative_context / maxCumulative) * 100;
             const showLabel = t.turn_index === 0 || ((t.turn_index + 1) % labelInterval === 0) || t.turn_index === turns.length - 1;
             return (
-              <div key={`${mode}-${t.turn_index}`} className="flex-1 flex flex-col items-center min-w-0" title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)} (cum: ${formatCost(cumulativeCosts[t.turn_index])}), cache hit ${formatPercent(t.cache_hit_rate)}`}>
+              <div key={`${mode}-${t.turn_index}`} className="flex-1 flex flex-col items-center min-w-0" style={{ maxWidth: 60 }} title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)} (cum: ${formatCost(cumulativeCosts[t.turn_index])}), cache hit ${formatPercent(t.cache_hit_rate)}`}>
                 <div className="w-full h-[160px] flex flex-col justify-end">
                   <div className="w-full flex flex-col rounded-t-sm overflow-hidden" style={{ height: `${Math.max(heightPct, 0.5)}%` }}>
                     {(mode === "cost" || mode === "cumulative-cost") ? (
@@ -1540,7 +1540,7 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
   const firstTurnCacheWrite = turns.length > 0 ? turns[0].cache_write_tokens : 0;
   const maxTurnCost = Math.max(...turns.map((t) => t.cost_usd), 0);
   return (
-    <div className="max-w-[1200px] mx-auto bg-[var(--color-surface)] rounded-xl p-6 shadow-lg">
+    <div className="mx-auto bg-[var(--color-surface)] rounded-xl p-6 shadow-lg">
       <button className="bg-none border border-[var(--color-border)] px-3.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer text-[var(--color-muted)] font-[inherit] mb-4 transition-all duration-150 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)]" onClick={onBack}>{"\u2190"} Back to Sessions</button>
       <div className="mb-5">
         <h2 className="text-xl font-bold mb-2">{shortenProject(summary.project)}</h2>
@@ -1660,13 +1660,13 @@ function App() {
     return (
       <div>
         <header className="glass-header mb-6">
-          <div className="max-w-[1400px] mx-auto px-5">
+          <div className="mx-auto px-5">
             <div className="flex items-center gap-4 py-3">
               <img src="/icon-horizontal.png" alt="Token Wise" className="h-10" />
             </div>
           </div>
         </header>
-        <main className="max-w-[1400px] mx-auto px-5">
+        <main className="mx-auto px-5">
           {detailLoading ? <LoadingScreen message="Loading session detail..." /> : sessionDetail ? <SessionDetailView detail={sessionDetail} onBack={() => setSessionDetail(null)} /> : null}
         </main>
       </div>
@@ -1676,7 +1676,7 @@ function App() {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>
       <header className="glass-header mb-6">
-        <div className="max-w-[1400px] mx-auto px-5">
+        <div className="mx-auto px-5">
           <div className="flex items-center gap-6 py-3">
             <motion.img
               src="/icon-horizontal.png"
@@ -1725,7 +1725,7 @@ function App() {
           </div>
         </div>
       </header>
-      <main className="max-w-[1400px] mx-auto px-5">
+      <main className="mx-auto px-5">
       <div>
         <AnimatePresence>
           {projectFilter && (
