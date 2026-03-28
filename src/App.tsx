@@ -6,6 +6,7 @@ import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, Tu
 import { codeToHtml } from "shiki";
 import ReactMarkdown from "react-markdown";
 import { LoadingScreen } from "./LoadingScreen";
+import { Tooltip, TruncatedCell } from "./components/Tooltip";
 
 import "./App.css";
 
@@ -195,10 +196,10 @@ function FilterDropdown({ label, value, renderContent, className }: { label: str
 
 function FilterOption({ selected, onClick, label, sub, tooltip }: { selected: boolean; onClick: () => void; label: string; sub?: string; tooltip?: string }) {
   return (
+    <Tooltip content={tooltip}>
     <button
       className={`w-full text-left px-3 py-2 text-[13px] border-none bg-transparent cursor-pointer transition-all duration-100 flex items-center justify-between gap-2 font-[inherit] ${selected ? "text-[var(--color-primary)] font-semibold bg-[rgba(74,144,217,0.08)]" : "text-inherit hover:bg-[rgba(74,144,217,0.05)]"}`}
       onClick={onClick}
-      title={tooltip}
     >
       <span className="flex items-center gap-2">
         <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${selected ? "border-[var(--color-primary)]" : "border-[var(--color-border)]"}`}>
@@ -208,6 +209,7 @@ function FilterOption({ selected, onClick, label, sub, tooltip }: { selected: bo
       </span>
       {sub && <span className="text-[var(--color-muted)] text-xs">{sub}</span>}
     </button>
+    </Tooltip>
   );
 }
 
@@ -307,7 +309,7 @@ function CostBar({ breakdown }: { breakdown: OverviewMetrics["cost_breakdown"] }
       <h3 className="text-sm font-semibold mb-3">Cost Breakdown</h3>
       <div className="flex h-6 rounded overflow-hidden mb-3">
         {segments.map((s) => (
-          <div key={s.label} className="min-w-0.5 transition-[width] duration-300" style={{ width: `${(s.value / total) * 100}%`, backgroundColor: s.color }} title={`${s.label}: ${formatCost(s.value)}`} />
+          <Tooltip key={s.label} content={`${s.label}: ${formatCost(s.value)}`}><div className="min-w-0.5 transition-[width] duration-300" style={{ width: `${(s.value / total) * 100}%`, backgroundColor: s.color }} /></Tooltip>
         ))}
       </div>
       <div className="flex flex-wrap gap-3">
@@ -334,7 +336,7 @@ function DailyCostChart({ dailyCosts, pricing }: { dailyCosts: OverviewMetrics["
           const barTotal = bd.input + bd.output + bd.cache_write + bd.cache_read;
           const heightPct = (d.cost_usd / maxCost) * 100;
           return (
-            <div key={d.date} className="flex-1 flex flex-col items-center" title={`${d.date}: ${formatCost(d.cost_usd)}`}>
+            <Tooltip key={d.date} content={`${d.date}: ${formatCost(d.cost_usd)}`}><div className="flex-1 flex flex-col items-center">
               <div className="w-full h-[120px] flex flex-col justify-end">
                 <div className="w-full flex flex-col rounded-t-sm overflow-hidden min-h-px" style={{ height: `${heightPct}%` }}>
                   {barTotal > 0 ? (<>
@@ -346,7 +348,7 @@ function DailyCostChart({ dailyCosts, pricing }: { dailyCosts: OverviewMetrics["
                 </div>
               </div>
               <div className="text-[9px] text-[var(--color-muted)] mt-1 [writing-mode:vertical-rl] [text-orientation:mixed] h-9 overflow-hidden">{d.date.slice(5)}</div>
-            </div>
+            </div></Tooltip>
           );
         })}
       </div>
@@ -632,8 +634,8 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
                     transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                   }}
                 >
-                  <td className={tdBase} style={{ width: 240, minWidth: 240 }} title={s.project}>{shortenProject(s.project)}</td>
-                  <td className={`${tdBase} max-w-[300px]`} title={s.title ?? ""}>{s.title ?? "\u2014"}</td>
+                  <td className={tdBase} style={{ width: 240, minWidth: 240 }}><TruncatedCell content={s.project}>{shortenProject(s.project)}</TruncatedCell></td>
+                  <td className={`${tdBase} max-w-[300px]`}><TruncatedCell content={s.title ?? ""}>{s.title ?? "\u2014"}</TruncatedCell></td>
                   <td className={`${tdBase} max-w-[200px]`}>{s.git_branch ?? "\u2014"}</td>
                   <td className={tdBase}>{s.message_count}</td>
                   <td className={tdBase}>{formatDuration(getSessionDurationMs(s))}</td>
@@ -709,7 +711,7 @@ function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary
         <tbody>
           {sorted.map((p) => (
             <tr key={p.project} className={`hover:bg-[rgba(74,144,217,0.05)] ${onSelectProject ? "cursor-pointer hover:bg-[rgba(74,144,217,0.1)]!" : ""}`} onClick={() => onSelectProject?.(p.project)}>
-              <td className={tdBase} style={{ minWidth: 360, maxWidth: 520 }} title={p.project}>{shortenProject(p.project)}</td>
+              <td className={tdBase} style={{ minWidth: 360, maxWidth: 520 }}><TruncatedCell content={p.project}>{shortenProject(p.project)}</TruncatedCell></td>
               <td className={tdBase}>{p.session_count}</td>
               <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(p.total_cost_usd)}</td>
               <td className={tdBase}>{formatPercent(p.avg_cache_hit_rate)}</td>
@@ -853,7 +855,7 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
                   : (t.cumulative_context / maxCumulative) * 100;
             const showLabel = t.turn_index === 0 || ((t.turn_index + 1) % labelInterval === 0) || t.turn_index === turns.length - 1;
             return (
-              <div key={`${mode}-${t.turn_index}`} className="flex-1 flex flex-col items-center min-w-0" title={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)} (cum: ${formatCost(cumulativeCosts[t.turn_index])}), cache hit ${formatPercent(t.cache_hit_rate)}`}>
+              <Tooltip key={`${mode}-${t.turn_index}`} content={`Turn ${t.turn_index + 1} (${t.role}): ${formatTokens(perTurnTotal)} this turn, ${formatTokens(t.cumulative_context)} cumulative, ${formatCost(t.cost_usd)} (cum: ${formatCost(cumulativeCosts[t.turn_index])}), cache hit ${formatPercent(t.cache_hit_rate)}`}><div className="flex-1 flex flex-col items-center min-w-0">
                 <div className="w-full h-[160px] flex flex-col justify-end">
                   <div className="w-full flex flex-col rounded-t-sm overflow-hidden" style={{ height: `${Math.max(heightPct, 0.5)}%` }}>
                     {(mode === "cost" || mode === "cumulative-cost") ? (
@@ -866,7 +868,7 @@ function ContextGrowthChart({ turns }: { turns: TurnMetrics[] }) {
                   </div>
                 </div>
                 <div className={`text-[9px] mt-1 select-none ${showLabel ? "text-[var(--color-muted)]" : "text-transparent"}`}>{t.turn_index + 1}</div>
-              </div>
+              </div></Tooltip>
             );
           })}
         </div>
@@ -1248,7 +1250,7 @@ function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => vo
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-sm font-semibold shrink-0">Content Preview</span>
-            {item.source && <span className="text-[12px] text-[var(--color-muted)] truncate" title={item.source}>{item.source}</span>}
+            {item.source && <Tooltip content={item.source}><span className="text-[12px] text-[var(--color-muted)] truncate">{item.source}</span></Tooltip>}
             <span className="text-[11px] px-1.5 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)] shrink-0">{fileEdit ? "diff" : thinking ? "thinking" : isMarkdown ? "markdown" : effectiveLang}</span>
           </div>
           <button
@@ -1407,7 +1409,7 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
                         {item.category}
                       </td>
                       <td className={tdBase}>{item.tool_name ?? "\u2014"}</td>
-                      <td className={`${tdBase} max-w-[260px] truncate`} title={item.source ?? undefined}>{item.source ?? "\u2014"}</td>
+                      <td className={`${tdBase} max-w-[260px]`}><TruncatedCell content={item.source ?? undefined}>{item.source ?? "\u2014"}</TruncatedCell></td>
                       <td className={tdBase}>{formatTokens(item.estimated_tokens)}</td>
                       <td className={tdBase}>
                         {item.full_content ? (
@@ -1512,7 +1514,7 @@ function TurnByTurnTable({ turns, maxTurnCost, contentItems }: { turns: TurnMetr
                                       {item.category}
                                     </td>
                                     <td className="py-1 px-2 whitespace-nowrap">{item.tool_name ?? "\u2014"}</td>
-                                    <td className="py-1 px-2 max-w-[400px] truncate" title={item.source ?? item.preview}>{item.source ?? item.preview}</td>
+                                    <td className="py-1 px-2 max-w-[400px]"><TruncatedCell content={item.source ?? item.preview}>{item.source ?? item.preview}</TruncatedCell></td>
                                     <td className="py-1 px-2 whitespace-nowrap">{formatTokens(item.estimated_tokens)}</td>
                                   </tr>
                                 ))}
@@ -1699,11 +1701,11 @@ function App() {
                 </motion.button>
               ))}
             </nav>
+            <Tooltip content="Refresh data (⌘R)">
             <motion.button
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[13px] font-medium text-[var(--color-muted)] cursor-pointer transition-colors duration-150 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={refreshData}
               disabled={refreshing}
-              title="Refresh data"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
@@ -1715,6 +1717,7 @@ function App() {
               </svg>
               Refresh
             </motion.button>
+            </Tooltip>
           </div>
           <div className="flex items-center gap-3 pb-3 flex-wrap">
             <SourceFilter value={sourceFilter} onChange={setSourceFilter} counts={sourceCounts} />

@@ -146,3 +146,43 @@
     background: color-mix(in srgb, var(--color-surface) 95%, #4a90d9);
   }
 }
+
+@layer components {
+  .tooltip-portal {
+    position: fixed;
+    z-index: 9999;
+    max-width: 400px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.85);
+    white-space: pre-line;
+    word-break: break-word;
+    animation: tooltipFadeIn 0.12s ease-out;
+  }
+
+  .tooltip-portal::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+  }
+
+  .tooltip-above::after {
+    top: 100%;
+    border-top-color: rgba(0, 0, 0, 0.85);
+  }
+
+  .tooltip-below::after {
+    bottom: 100%;
+    border-bottom-color: rgba(0, 0, 0, 0.85);
+  }
+
+  @keyframes tooltipFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
