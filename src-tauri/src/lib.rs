@@ -1,8 +1,5 @@
-mod entitlement;
 mod models;
 mod parser;
-mod storekit;
-mod trial;
 
 use models::{OverviewMetrics, PricingInfo, SessionDetail, SessionSummary};
 
@@ -50,12 +47,6 @@ pub fn run() {
             refresh_sessions,
             get_session_detail,
             get_pricing,
-            entitlement::fetch_products,
-            entitlement::purchase,
-            entitlement::check_entitlements,
-            entitlement::restore_purchases,
-            entitlement::start_trial,
-            entitlement::get_app_entitlement,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

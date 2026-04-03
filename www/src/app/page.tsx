@@ -255,7 +255,7 @@ export default function Home() {
             <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-lime/10 to-transparent rounded-full -translate-y-1/2 translate-x-1/2" />
             <div className="relative">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-lime/10 text-teal dark:text-lime text-sm font-medium mb-6">
-                3-day free trial
+                One-time purchase
               </div>
               <div className="flex items-baseline justify-center gap-2 mb-2">
                 <span className="text-5xl sm:text-6xl font-bold">Pro</span>
@@ -342,7 +342,7 @@ export default function Home() {
             Start tracking your AI costs today
           </h2>
           <p className="text-neutral-600 dark:text-neutral-400 mb-8">
-            Free 3-day trial. No account required.
+            Pay once, use it forever. No account required.
           </p>
           <a
             href="https://apps.apple.com/app/token-wise/id6746076950"
