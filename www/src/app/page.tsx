@@ -88,7 +88,7 @@ export default function Home() {
             <a href="#models" className="hover:text-foreground transition-colors">Models</a>
           </div>
           <a
-            href="https://apps.apple.com/app/token-wise/id6746076950"
+            href="https://apps.apple.com/us/app/token-wise/id6760606980?mt=12"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 bg-neutral-900 dark:bg-white dark:text-neutral-900 text-white text-sm font-medium px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
@@ -125,7 +125,7 @@ export default function Home() {
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-fade-in-up-delay-2">
             <a
-              href="https://apps.apple.com/app/token-wise/id6746076950"
+              href="https://apps.apple.com/us/app/token-wise/id6760606980?mt=12"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-3 bg-neutral-900 dark:bg-white dark:text-neutral-900 text-white font-semibold px-8 py-4 rounded-2xl hover:opacity-90 transition-opacity text-lg"
@@ -282,7 +282,7 @@ export default function Home() {
                 ))}
               </ul>
               <a
-                href="https://apps.apple.com/app/token-wise/id6746076950"
+                href="https://apps.apple.com/us/app/token-wise/id6760606980?mt=12"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-3 bg-neutral-900 dark:bg-white dark:text-neutral-900 text-white font-semibold px-8 py-4 rounded-2xl hover:opacity-90 transition-opacity text-lg"
@@ -345,7 +345,7 @@ export default function Home() {
             Pay once, use it forever. No account required.
           </p>
           <a
-            href="https://apps.apple.com/app/token-wise/id6746076950"
+            href="https://apps.apple.com/us/app/token-wise/id6760606980?mt=12"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-3 bg-neutral-900 dark:bg-white dark:text-neutral-900 text-white font-semibold px-8 py-4 rounded-2xl hover:opacity-90 transition-opacity text-lg"
