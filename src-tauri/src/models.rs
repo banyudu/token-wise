@@ -116,10 +116,59 @@ pub struct ContentAnalysis {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WastedWrite {
+    pub turn_index: u32,
+    pub wasted_tokens: u64,
+    pub wasted_cost_usd: f64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvalidationEvent {
+    pub turn_index: u32,
+    pub dropped_tokens: u64,
+    pub rewrite_cost_usd: f64,
+    pub suspected_cause: Option<String>,
+    pub suspected_preview: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnreferencedBlock {
+    pub turn_index: u32,
+    pub label: String,
+    pub estimated_tokens: u64,
+    pub carried_turns: u32,
+    pub wasted_cost_usd: f64,
+    pub preview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepeatedBlock {
+    pub occurrences: u32,
+    pub first_turn: u32,
+    pub last_turn: u32,
+    pub estimated_tokens_each: u64,
+    pub total_wasted_tokens: u64,
+    pub wasted_cost_usd: f64,
+    pub category: String,
+    pub preview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheSavingsReport {
+    pub wasted_cache_writes: Vec<WastedWrite>,
+    pub invalidation_events: Vec<InvalidationEvent>,
+    pub unreferenced_blocks: Vec<UnreferencedBlock>,
+    pub repeated_blocks: Vec<RepeatedBlock>,
+    pub total_potential_savings_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDetail {
     pub summary: SessionSummary,
     pub turns: Vec<TurnMetrics>,
     pub content_analysis: Option<ContentAnalysis>,
+    pub cache_savings: Option<CacheSavingsReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

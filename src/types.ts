@@ -102,10 +102,54 @@ export interface ContentAnalysis {
   suggestions: string[];
 }
 
+export interface WastedWrite {
+  turn_index: number;
+  wasted_tokens: number;
+  wasted_cost_usd: number;
+  reason: string;
+}
+
+export interface InvalidationEvent {
+  turn_index: number;
+  dropped_tokens: number;
+  rewrite_cost_usd: number;
+  suspected_cause: string | null;
+  suspected_preview: string | null;
+}
+
+export interface UnreferencedBlock {
+  turn_index: number;
+  label: string;
+  estimated_tokens: number;
+  carried_turns: number;
+  wasted_cost_usd: number;
+  preview: string;
+}
+
+export interface RepeatedBlock {
+  occurrences: number;
+  first_turn: number;
+  last_turn: number;
+  estimated_tokens_each: number;
+  total_wasted_tokens: number;
+  wasted_cost_usd: number;
+  category: string;
+  preview: string;
+}
+
+export interface CacheSavingsReport {
+  wasted_cache_writes: WastedWrite[];
+  invalidation_events: InvalidationEvent[];
+  unreferenced_blocks: UnreferencedBlock[];
+  repeated_blocks: RepeatedBlock[];
+  total_potential_savings_usd: number;
+}
+
 export interface SessionDetail {
   summary: SessionSummary;
   turns: TurnMetrics[];
   content_analysis: ContentAnalysis | null;
+  cache_savings: CacheSavingsReport | null;
 }
 
 export interface PricingInfo {

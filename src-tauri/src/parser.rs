@@ -684,8 +684,11 @@ pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<Ses
         }
 
         let content_analysis = Some(analyze_content(&messages));
+        let cache_savings = Some(crate::cache_savings::analyze_cache_savings(
+            &messages, &turns, pricing,
+        ));
         let summary = summarize_session(session_id, &messages, pricing, subagent_cost, subagent_count);
-        return Some(SessionDetail { summary, turns, content_analysis });
+        return Some(SessionDetail { summary, turns, content_analysis, cache_savings });
     }
 
     None

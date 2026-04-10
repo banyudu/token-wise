@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { invoke } from "@tauri-apps/api/core";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
-import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem } from "./types";
+import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem, CacheSavingsReport } from "./types";
 import { codeToHtml } from "shiki";
 import ReactMarkdown from "react-markdown";
 import { LoadingScreen } from "./LoadingScreen";
@@ -1445,6 +1445,178 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
   );
 }
 
+function CacheSavingsView({ report }: { report: CacheSavingsReport }) {
+  const hasAny =
+    report.wasted_cache_writes.length > 0 ||
+    report.invalidation_events.length > 0 ||
+    report.unreferenced_blocks.length > 0 ||
+    report.repeated_blocks.length > 0;
+
+  if (!hasAny) {
+    return (
+      <div className="mb-6">
+        <h3 className="text-sm font-semibold mb-3">Savings Opportunities</h3>
+        <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4 text-[13px] text-[var(--color-muted)]">
+          No savings opportunities detected — this session looks well-cached.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-6">
+      <h3 className="text-sm font-semibold mb-3">Savings Opportunities</h3>
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4">
+        <div className="mb-4 flex items-baseline gap-2">
+          <span className="text-[11px] uppercase tracking-wide text-[var(--color-muted)] font-semibold">Total Potential Savings</span>
+          <span className="text-lg font-bold text-[var(--color-output)]">{formatCost(report.total_potential_savings_usd)}</span>
+          <span className="text-[11px] text-[var(--color-muted)]">(heuristic estimate)</span>
+        </div>
+
+        {report.wasted_cache_writes.length > 0 && (
+          <details open className="mb-4">
+            <summary className="cursor-pointer text-[13px] font-semibold mb-2">
+              Wasted Cache Writes ({report.wasted_cache_writes.length}) —{" "}
+              {formatCost(report.wasted_cache_writes.reduce((a, b) => a + b.wasted_cost_usd, 0))}
+            </summary>
+            <div className="text-[11px] text-[var(--color-muted)] mb-2">
+              Cache written but never read back before session ended.
+            </div>
+            <table className="w-full border-collapse text-[12px]">
+              <thead className="border-b border-[var(--color-border)]">
+                <tr>
+                  <th className={thBase}>Turn</th>
+                  <th className={thBase}>Wasted</th>
+                  <th className={thBase}>Cost</th>
+                  <th className={thBase}>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.wasted_cache_writes.map((w, i) => (
+                  <tr key={i} className="hover:bg-[rgba(74,144,217,0.05)]">
+                    <td className={tdBase}>{w.turn_index + 1}</td>
+                    <td className={tdBase}>{formatTokens(w.wasted_tokens)}</td>
+                    <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(w.wasted_cost_usd)}</td>
+                    <td className={`${tdBase} max-w-[500px] whitespace-normal`}>{w.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+
+        {report.invalidation_events.length > 0 && (
+          <details open className="mb-4">
+            <summary className="cursor-pointer text-[13px] font-semibold mb-2">
+              Cache Prefix Invalidations ({report.invalidation_events.length}) —{" "}
+              {formatCost(report.invalidation_events.reduce((a, b) => a + b.rewrite_cost_usd, 0))}
+            </summary>
+            <div className="text-[11px] text-[var(--color-muted)] mb-2">
+              Turns where the cached prefix was suddenly invalidated and re-written.
+            </div>
+            <table className="w-full border-collapse text-[12px]">
+              <thead className="border-b border-[var(--color-border)]">
+                <tr>
+                  <th className={thBase}>Turn</th>
+                  <th className={thBase}>Dropped</th>
+                  <th className={thBase}>Re-write Cost</th>
+                  <th className={thBase}>Suspected Cause</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.invalidation_events.map((e, i) => (
+                  <tr key={i} className="hover:bg-[rgba(74,144,217,0.05)]">
+                    <td className={tdBase}>{e.turn_index + 1}</td>
+                    <td className={tdBase}>{formatTokens(e.dropped_tokens)}</td>
+                    <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(e.rewrite_cost_usd)}</td>
+                    <td className={`${tdBase} max-w-[500px] whitespace-normal`} title={e.suspected_preview ?? undefined}>
+                      {e.suspected_cause ?? "\u2014"}
+                      {e.suspected_preview && <div className="text-[11px] text-[var(--color-muted)] mt-0.5 truncate">{e.suspected_preview}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+
+        {report.unreferenced_blocks.length > 0 && (
+          <details open className="mb-4">
+            <summary className="cursor-pointer text-[13px] font-semibold mb-2">
+              Unreferenced Context Blocks ({report.unreferenced_blocks.length}) —{" "}
+              {formatCost(report.unreferenced_blocks.reduce((a, b) => a + b.wasted_cost_usd, 0))}
+              <span className="ml-2 inline-block px-1.5 py-0.5 rounded text-[10px] bg-[rgba(231,76,60,0.12)] text-[var(--color-output)] border border-[rgba(231,76,60,0.3)]">heuristic</span>
+            </summary>
+            <div className="text-[11px] text-[var(--color-muted)] mb-2">
+              Large CLAUDE.md / system-reminder blocks loaded into context but seemingly never referenced downstream. May yield false positives when content influences behavior indirectly.
+            </div>
+            <table className="w-full border-collapse text-[12px]">
+              <thead className="border-b border-[var(--color-border)]">
+                <tr>
+                  <th className={thBase}>Turn</th>
+                  <th className={thBase}>Label</th>
+                  <th className={thBase}>Size</th>
+                  <th className={thBase}>Carried</th>
+                  <th className={thBase}>Est. Cost</th>
+                  <th className={thBase}>Preview</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.unreferenced_blocks.map((b, i) => (
+                  <tr key={i} className="hover:bg-[rgba(74,144,217,0.05)]">
+                    <td className={tdBase}>{b.turn_index + 1}</td>
+                    <td className={tdBase}>{b.label}</td>
+                    <td className={tdBase}>{formatTokens(b.estimated_tokens)}</td>
+                    <td className={tdBase}>{b.carried_turns} turns</td>
+                    <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(b.wasted_cost_usd)}</td>
+                    <td className={`${tdBase} max-w-[400px] truncate`} title={b.preview}>{b.preview}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+
+        {report.repeated_blocks.length > 0 && (
+          <details className="mb-2">
+            <summary className="cursor-pointer text-[13px] font-semibold mb-2">
+              Repeated Content Blocks ({report.repeated_blocks.length}) —{" "}
+              {formatCost(report.repeated_blocks.reduce((a, b) => a + b.wasted_cost_usd, 0))}
+            </summary>
+            <div className="text-[11px] text-[var(--color-muted)] mb-2">
+              Same content appearing in multiple turns. Could indicate re-reads of the same file or duplicated tool results.
+            </div>
+            <table className="w-full border-collapse text-[12px]">
+              <thead className="border-b border-[var(--color-border)]">
+                <tr>
+                  <th className={thBase}>Occurrences</th>
+                  <th className={thBase}>Turns</th>
+                  <th className={thBase}>Size Each</th>
+                  <th className={thBase}>Total Wasted</th>
+                  <th className={thBase}>Cost</th>
+                  <th className={thBase}>Preview</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.repeated_blocks.map((b, i) => (
+                  <tr key={i} className="hover:bg-[rgba(74,144,217,0.05)]">
+                    <td className={tdBase}>{b.occurrences}</td>
+                    <td className={tdBase}>{b.first_turn + 1}{b.first_turn !== b.last_turn ? ` → ${b.last_turn + 1}` : ""}</td>
+                    <td className={tdBase}>{formatTokens(b.estimated_tokens_each)}</td>
+                    <td className={tdBase}>{formatTokens(b.total_wasted_tokens)}</td>
+                    <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(b.wasted_cost_usd)}</td>
+                    <td className={`${tdBase} max-w-[400px] truncate`} title={b.preview}>{b.preview}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TurnByTurnTable({ turns, maxTurnCost, contentItems }: { turns: TurnMetrics[]; maxTurnCost: number; contentItems: ContentItem[] }) {
   const [expandedTurn, setExpandedTurn] = useState<number | null>(null);
 
@@ -1562,6 +1734,7 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
         )}
       </div>
       {detail.content_analysis && <ContentAnalysisView analysis={detail.content_analysis} />}
+      {detail.cache_savings && <CacheSavingsView report={detail.cache_savings} />}
       <ContextGrowthChart turns={turns} />
       <TurnByTurnTable turns={turns} maxTurnCost={maxTurnCost} contentItems={detail.content_analysis?.all_items ?? []} />
     </div>
