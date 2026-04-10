@@ -432,10 +432,37 @@ function Recommendations({ sessions, overview }: { sessions: SessionSummary[]; o
 }
 
 function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewMetrics; sessions: SessionSummary[]; pricing: ModelPricing }) {
+  const distribution = useMemo(() => {
+    const claudeSessions = sessions.filter((s) => s.source === "claude" && s.message_count > 0);
+    if (claudeSessions.length === 0) return null;
+    const poor = claudeSessions.filter((s) => s.cache_hit_rate < 0.5);
+    const mediocre = claudeSessions.filter((s) => s.cache_hit_rate >= 0.5 && s.cache_hit_rate < 0.8);
+    const good = claudeSessions.filter((s) => s.cache_hit_rate >= 0.8);
+    const poorCost = poor.reduce((sum, s) => sum + s.estimated_cost_usd, 0);
+    const mediocreCost = mediocre.reduce((sum, s) => sum + s.estimated_cost_usd, 0);
+    return {
+      total: claudeSessions.length,
+      poor: poor.length, poorCost,
+      mediocre: mediocre.length, mediocreCost,
+      good: good.length,
+      lowCacheCount: poor.length + mediocre.length,
+      lowCacheCost: poorCost + mediocreCost,
+    };
+  }, [sessions]);
+
   const savings = useMemo(() => {
     const currentCacheRate = overview.avg_cache_hit_rate;
     const totalContext = overview.total_input_tokens + overview.total_cache_write_tokens + overview.total_cache_read_tokens;
-    if (totalContext === 0 || currentCacheRate >= 0.85) return null;
+    if (totalContext === 0) return null;
+
+    const shortSessions = sessions.filter((s) => s.source === "claude" && s.message_count <= 3);
+    const shortSessionCost = shortSessions.reduce((sum, s) => sum + s.estimated_cost_usd, 0);
+
+    if (currentCacheRate >= 0.85) return {
+      currentRate: currentCacheRate, targetRate: currentCacheRate, currentCost: overview.cost_breakdown.total_cost,
+      projectedCost: overview.cost_breakdown.total_cost, savedAmount: 0, savedPercent: 0,
+      shortSessionCount: shortSessions.length, shortSessionCost, excellent: true,
+    };
 
     const targetRate = Math.min(currentCacheRate + 0.2, 0.85);
     const currentCacheReadTokens = overview.total_cache_read_tokens;
@@ -456,54 +483,75 @@ function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewM
     const projectedCost = newInputCost + newCwCost + newCrCost + newOutputCost;
     const savedAmount = currentCost - projectedCost;
 
-    const shortSessions = sessions.filter((s) => s.source === "claude" && s.message_count <= 3);
-    const shortSessionCost = shortSessions.reduce((sum, s) => sum + s.estimated_cost_usd, 0);
-
     return {
       currentRate: currentCacheRate, targetRate, currentCost,
       projectedCost: Math.max(0, projectedCost), savedAmount: Math.max(0, savedAmount),
       savedPercent: currentCost > 0 ? Math.max(0, savedAmount) / currentCost : 0,
-      shortSessionCount: shortSessions.length, shortSessionCost,
+      shortSessionCount: shortSessions.length, shortSessionCost, excellent: false,
     };
   }, [overview, sessions, pricing]);
 
-  if (!savings) return (
-    <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4 mb-6">
-      <h3 className="text-sm font-semibold mb-3">Savings Potential</h3>
-      <div className="text-[var(--color-cache-read)] text-[13px] py-2">Your cache hit rate is already excellent ({formatPercent(overview.avg_cache_hit_rate)}). Keep it up!</div>
-    </div>
-  );
+  if (!savings) return null;
+
+  const hasDistributionInsight = distribution && distribution.lowCacheCount > 0;
 
   return (
     <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4 mb-6">
       <h3 className="text-sm font-semibold mb-3">Savings Potential</h3>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
-        <div className="border border-[var(--color-border)] rounded-lg p-4">
-          <div className="flex items-center gap-4 mb-3">
-            <div className="flex-1 text-center">
-              <div className="text-[11px] uppercase tracking-wide text-[var(--color-muted)] mb-1">Current</div>
-              <div className="text-xl font-bold">{formatCost(savings.currentCost)}</div>
-              <div className="text-[11px] text-[var(--color-muted)] mt-0.5">Cache: {formatPercent(savings.currentRate)}</div>
+      {savings.excellent && !hasDistributionInsight ? (
+        <div className="text-[var(--color-cache-read)] text-[13px] py-2">Your cache hit rate is already excellent ({formatPercent(overview.avg_cache_hit_rate)}). Keep it up!</div>
+      ) : (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
+          {!savings.excellent && (
+            <div className="border border-[var(--color-border)] rounded-lg p-4">
+              <div className="flex items-center gap-4 mb-3">
+                <div className="flex-1 text-center">
+                  <div className="text-[11px] uppercase tracking-wide text-[var(--color-muted)] mb-1">Current</div>
+                  <div className="text-xl font-bold">{formatCost(savings.currentCost)}</div>
+                  <div className="text-[11px] text-[var(--color-muted)] mt-0.5">Cache: {formatPercent(savings.currentRate)}</div>
+                </div>
+                <div className="text-xl text-[var(--color-muted)] shrink-0">{"\u2192"}</div>
+                <div className="flex-1 text-center">
+                  <div className="text-[11px] uppercase tracking-wide text-[var(--color-muted)] mb-1">Projected</div>
+                  <div className="text-xl font-bold">{formatCost(savings.projectedCost)}</div>
+                  <div className="text-[11px] text-[var(--color-muted)] mt-0.5">Cache: {formatPercent(savings.targetRate)}</div>
+                </div>
+              </div>
+              <div className="text-xs text-[var(--color-cache-read)] font-medium pt-2 border-t border-[var(--color-border)]">
+                Save {formatCost(savings.savedAmount)} ({formatPercent(savings.savedPercent)}) by improving cache hit rate to {formatPercent(savings.targetRate)}
+              </div>
             </div>
-            <div className="text-xl text-[var(--color-muted)] shrink-0">{"\u2192"}</div>
-            <div className="flex-1 text-center">
-              <div className="text-[11px] uppercase tracking-wide text-[var(--color-muted)] mb-1">Projected</div>
-              <div className="text-xl font-bold">{formatCost(savings.projectedCost)}</div>
-              <div className="text-[11px] text-[var(--color-muted)] mt-0.5">Cache: {formatPercent(savings.targetRate)}</div>
+          )}
+          {hasDistributionInsight && (
+            <div className="border border-[var(--color-border)] rounded-lg p-4">
+              <div className="text-[13px] font-medium mb-2">Per-Session Cache Distribution</div>
+              <div className="flex gap-1 h-5 rounded overflow-hidden mb-2">
+                {distribution.good > 0 && <div className="bg-[var(--color-cache-read)]" style={{ flex: distribution.good }} title={`${distribution.good} sessions with >80% cache hit`} />}
+                {distribution.mediocre > 0 && <div className="bg-[#e8a735]" style={{ flex: distribution.mediocre }} title={`${distribution.mediocre} sessions with 50-80% cache hit`} />}
+                {distribution.poor > 0 && <div className="bg-[#e05252]" style={{ flex: distribution.poor }} title={`${distribution.poor} sessions with <50% cache hit`} />}
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--color-muted)]">
+                <span><span className="inline-block w-2 h-2 rounded-full bg-[var(--color-cache-read)] mr-1" />{distribution.good} good ({">"}80%)</span>
+                <span><span className="inline-block w-2 h-2 rounded-full bg-[#e8a735] mr-1" />{distribution.mediocre} mediocre (50-80%)</span>
+                <span><span className="inline-block w-2 h-2 rounded-full bg-[#e05252] mr-1" />{distribution.poor} poor ({"<"}50%)</span>
+              </div>
+              {distribution.lowCacheCost > 0.01 && (
+                <div className="text-xs text-[#e8a735] font-medium pt-2 border-t border-[var(--color-border)] mt-3">
+                  {distribution.lowCacheCount} session{distribution.lowCacheCount > 1 ? "s" : ""} with sub-optimal cache ({formatCost(distribution.lowCacheCost)})
+                  {savings.excellent && " despite excellent global rate"}
+                </div>
+              )}
             </div>
-          </div>
-          <div className="text-xs text-[var(--color-cache-read)] font-medium pt-2 border-t border-[var(--color-border)]">
-            Save {formatCost(savings.savedAmount)} ({formatPercent(savings.savedPercent)}) by improving cache hit rate to {formatPercent(savings.targetRate)}
-          </div>
+          )}
+          {savings.shortSessionCount > 3 && (
+            <div className="border border-[var(--color-border)] rounded-lg p-4">
+              <div className="text-xl font-bold">{savings.shortSessionCount} short sessions</div>
+              <div className="text-[11px] text-[var(--color-muted)] mt-0.5">{formatCost(savings.shortSessionCost)} spent on sessions with {"\u2264"}3 messages</div>
+              <div className="text-xs text-[var(--color-cache-read)] font-medium pt-2 border-t border-[var(--color-border)] mt-3">Consolidating these into longer sessions could significantly reduce cache write overhead</div>
+            </div>
+          )}
         </div>
-        {savings.shortSessionCount > 3 && (
-          <div className="border border-[var(--color-border)] rounded-lg p-4">
-            <div className="text-xl font-bold">{savings.shortSessionCount} short sessions</div>
-            <div className="text-[11px] text-[var(--color-muted)] mt-0.5">{formatCost(savings.shortSessionCost)} spent on sessions with {"\u2264"}3 messages</div>
-            <div className="text-xs text-[var(--color-cache-read)] font-medium pt-2 border-t border-[var(--color-border)] mt-3">Consolidating these into longer sessions could significantly reduce cache write overhead</div>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
