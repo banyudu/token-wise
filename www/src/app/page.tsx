@@ -247,21 +247,21 @@ export default function Home() {
       {/* Pricing */}
       <section id="pricing" className="py-24 px-6">
         <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-3xl sm:text-4xl font-bold mb-4">Simple pricing</h2>
+          <h2 className="text-3xl sm:text-4xl font-bold mb-4">Free to use</h2>
           <p className="text-neutral-600 dark:text-neutral-400 mb-12">
-            One-time purchase. No subscriptions. No hidden fees.
+            No subscriptions. No accounts. No hidden fees.
           </p>
           <div className="bg-white dark:bg-neutral-800/50 rounded-3xl border border-neutral-200 dark:border-neutral-800 p-8 sm:p-12 relative overflow-hidden">
             <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-lime/10 to-transparent rounded-full -translate-y-1/2 translate-x-1/2" />
             <div className="relative">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-lime/10 text-teal dark:text-lime text-sm font-medium mb-6">
-                One-time purchase
+                Free download
               </div>
               <div className="flex items-baseline justify-center gap-2 mb-2">
-                <span className="text-5xl sm:text-6xl font-bold">Pro</span>
+                <span className="text-5xl sm:text-6xl font-bold">Free</span>
               </div>
               <p className="text-neutral-500 mb-8">
-                Pay once, own forever. All features included.
+                All features included. No upgrades, no add-ons.
               </p>
               <ul className="text-left max-w-sm mx-auto space-y-3 mb-10">
                 {[
@@ -343,7 +343,7 @@ export default function Home() {
             Start tracking your AI costs today
           </h2>
           <p className="text-neutral-600 dark:text-neutral-400 mb-8">
-            Pay once, use it forever. No account required.
+            Free download. No account required.
           </p>
           <a
             href="https://apps.apple.com/us/app/token-wise/id6760606980?mt=12"
