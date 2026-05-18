@@ -1,6 +1,7 @@
-mod cache_savings;
-mod models;
-mod parser;
+pub mod cache_savings;
+pub mod cli;
+pub mod models;
+pub mod parser;
 
 use models::{OverviewMetrics, PricingInfo, SessionDetail, SessionSummary};
 
