@@ -61,6 +61,16 @@ const features = [
     description:
       "Explore individual sessions turn-by-turn. See token usage, context growth, and content analysis for each conversation.",
   },
+  {
+    icon: (
+      <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+      </svg>
+    ),
+    title: "Command Line Interface",
+    description:
+      "Same binary, terminal-friendly. Run `token-wise total`, `today`, or `sessions` for quick stats. Every command supports --json for scripting.",
+  },
 ];
 
 const pricingModels = [
@@ -84,6 +94,7 @@ export default function Home() {
           </div>
           <div className="hidden sm:flex items-center gap-8 text-sm text-neutral-600 dark:text-neutral-400">
             <a href="#features" className="hover:text-foreground transition-colors">Features</a>
+            <a href="#cli" className="hover:text-foreground transition-colors">CLI</a>
             <a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a>
             <a href="#models" className="hover:text-foreground transition-colors">Models</a>
           </div>
@@ -240,6 +251,55 @@ export default function Home() {
                 </p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CLI */}
+      <section id="cli" className="py-24 px-6">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-12">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal/10 text-teal dark:text-lime text-sm font-medium mb-4">
+              New in 0.1.5
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">Use it from the terminal</h2>
+            <p className="text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">
+              The same binary doubles as a CLI. Pipe it into scripts, drop it in your status bar, or just check your spend without leaving the shell.
+            </p>
+          </div>
+          <div className="bg-neutral-950 dark:bg-neutral-900 text-neutral-100 rounded-2xl border border-neutral-800 overflow-hidden font-mono text-sm">
+            <div className="flex items-center gap-2 px-4 py-3 bg-neutral-900/60 border-b border-neutral-800">
+              <div className="w-3 h-3 rounded-full bg-red-400" />
+              <div className="w-3 h-3 rounded-full bg-yellow-400" />
+              <div className="w-3 h-3 rounded-full bg-green-400" />
+              <span className="ml-3 text-xs text-neutral-500">~/dev</span>
+            </div>
+            <pre className="p-6 overflow-x-auto leading-relaxed">
+              <span className="text-lime">$</span> token-wise total{"\n"}
+              Total: $142.38 (30 days, 247 sessions){"\n"}
+              {"\n"}
+              <span className="text-lime">$</span> token-wise today{"\n"}
+              Today:  $4.21 (8 sessions){"\n"}
+              {"        "}Cache hit rate: 73%{"\n"}
+              {"\n"}
+              <span className="text-lime">$</span> token-wise sessions --limit 5{"\n"}
+              PROJECT                        COST     TOKENS   CACHE{"\n"}
+              api-gateway                  $8.42       2.1M     81%{"\n"}
+              web-dashboard                $5.17       1.4M     68%{"\n"}
+              ml-pipeline                  $3.95       980K     72%{"\n"}
+              docs-site                    $2.10       540K     85%{"\n"}
+              auth-service                 $1.78       420K     79%{"\n"}
+              {"\n"}
+              <span className="text-neutral-500"># Pipe into anything &mdash; every command supports --json</span>{"\n"}
+              <span className="text-lime">$</span> token-wise today --json | jq .total_cost_usd{"\n"}
+              4.21
+            </pre>
+          </div>
+          <div className="mt-6 bg-neutral-50 dark:bg-neutral-900/40 border border-neutral-200 dark:border-neutral-800 rounded-xl p-5 text-sm text-neutral-600 dark:text-neutral-400">
+            <span className="font-semibold text-neutral-800 dark:text-neutral-200">Setup:</span> the CLI is bundled with the app. After installing from the App Store, add this to your shell config:
+            <pre className="mt-3 px-4 py-3 bg-neutral-900 text-neutral-100 rounded-lg overflow-x-auto text-xs">
+              alias token-wise=&apos;/Applications/token-wise.app/Contents/MacOS/token-wise&apos;
+            </pre>
           </div>
         </div>
       </section>
