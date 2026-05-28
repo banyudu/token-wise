@@ -1,7 +1,7 @@
 use crate::models::{
     ClaudeMessage, CodexThread, CodexTokenUsage, ContentAnalysis, ContentCategory, ContentItem,
-    DailyCost, OverviewMetrics, PricingInfo, ProjectSummary, SessionDetail, SessionSummary,
-    TurnMetrics,
+    CostBreakdown, DailyCost, OverviewMetrics, PricingTable, ProjectSummary, SessionDetail,
+    SessionSummary, TurnMetrics,
 };
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -17,10 +17,10 @@ struct CachedSessions {
 
 static SESSION_CACHE: Mutex<Option<CachedSessions>> = Mutex::new(None);
 
-static PRICING_CACHE: std::sync::OnceLock<PricingInfo> = std::sync::OnceLock::new();
+static PRICING_CACHE: std::sync::OnceLock<PricingTable> = std::sync::OnceLock::new();
 
-pub fn get_cached_pricing() -> &'static PricingInfo {
-    PRICING_CACHE.get_or_init(PricingInfo::from_claude_pricing_file)
+pub fn get_cached_pricing() -> &'static PricingTable {
+    PRICING_CACHE.get_or_init(PricingTable::load)
 }
 
 fn get_claude_projects_dir() -> Option<PathBuf> {
@@ -72,7 +72,7 @@ fn parse_jsonl_file(path: &PathBuf) -> Vec<ClaudeMessage> {
 fn summarize_session(
     session_id: &str,
     messages: &[ClaudeMessage],
-    pricing: &PricingInfo,
+    pricing: &PricingTable,
     subagent_cost: f64,
     subagent_count: u32,
 ) -> SessionSummary {
@@ -88,9 +88,13 @@ fn summarize_session(
     let mut project = String::new();
     let mut git_branch: Option<String> = None;
     let mut title: Option<String> = None;
+    let mut cost_breakdown = CostBreakdown::default();
+    let mut model: Option<String> = None;
 
     for msg in messages {
-        let usage_opt = msg.message.as_ref().and_then(|m| m.usage.as_ref());
+        let inner = msg.message.as_ref();
+        let msg_model = inner.and_then(|m| m.model.as_deref());
+        let usage_opt = inner.and_then(|m| m.usage.as_ref());
         if let Some(usage) = usage_opt {
             total_input += usage.input_tokens;
             total_output += usage.output_tokens;
@@ -100,6 +104,19 @@ fn summarize_session(
                 total_eph_5m += cd.ephemeral_5m_input_tokens;
                 total_eph_1h += cd.ephemeral_1h_input_tokens;
             }
+            let pricing_info = pricing.for_model(msg_model.unwrap_or(""));
+            let turn_cost = pricing_info.calculate_cost(
+                usage.input_tokens,
+                usage.cache_creation_input_tokens,
+                usage.cache_read_input_tokens,
+                usage.output_tokens,
+            );
+            cost_breakdown.add(&turn_cost);
+        }
+        if let Some(m) = msg_model {
+            // Keep the most recently observed model — within a session the
+            // last turn's model is typically the most representative.
+            model = Some(m.to_string());
         }
         if msg.r#type == "user" || msg.r#type == "assistant" {
             msg_count += 1;
@@ -166,8 +183,6 @@ fn summarize_session(
         0.0
     };
 
-    let cost = pricing.calculate_cost(total_input, total_cache_write, total_cache_read, total_output);
-
     SessionSummary {
         session_id: session_id.to_string(),
         project,
@@ -179,12 +194,14 @@ fn summarize_session(
         total_cache_write_tokens: total_cache_write,
         total_cache_read_tokens: total_cache_read,
         cache_hit_rate,
-        estimated_cost_usd: cost.total_cost + subagent_cost,
+        estimated_cost_usd: cost_breakdown.total_cost + subagent_cost,
+        cost_breakdown,
         first_timestamp: first_ts,
         last_timestamp: last_ts,
         subagent_count,
         subagent_cost_usd: subagent_cost,
         source: "claude".to_string(),
+        model,
         ephemeral_5m_tokens: total_eph_5m,
         ephemeral_1h_tokens: total_eph_1h,
     }
@@ -613,7 +630,7 @@ fn analyze_content(messages: &[ClaudeMessage]) -> ContentAnalysis {
     }
 }
 
-pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<SessionDetail> {
+pub fn get_session_detail(session_id: &str, pricing: &PricingTable) -> Option<SessionDetail> {
     let projects_dir = get_claude_projects_dir()?;
     let pattern = format!("{}/**/{}.jsonl", projects_dir.display(), session_id);
 
@@ -637,7 +654,9 @@ pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<Ses
         let mut cumulative_context = 0u64;
 
         for msg in &messages {
-            let usage_opt = msg.message.as_ref().and_then(|m| m.usage.as_ref());
+            let inner = msg.message.as_ref();
+            let msg_model = inner.and_then(|m| m.model.as_deref()).unwrap_or("");
+            let usage_opt = inner.and_then(|m| m.usage.as_ref());
             if let Some(usage) = usage_opt {
                 let input = usage.input_tokens;
                 let output = usage.output_tokens;
@@ -647,7 +666,7 @@ pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<Ses
 
                 let total_ctx = input + cw + cr;
                 let hit_rate = if total_ctx > 0 { cr as f64 / total_ctx as f64 } else { 0.0 };
-                let cost = pricing.calculate_cost(input, cw, cr, output);
+                let cost = pricing.for_model(msg_model).calculate_cost(input, cw, cr, output);
 
                 turns.push(TurnMetrics {
                     turn_index,
@@ -684,10 +703,13 @@ pub fn get_session_detail(session_id: &str, pricing: &PricingInfo) -> Option<Ses
         }
 
         let content_analysis = Some(analyze_content(&messages));
-        let cache_savings = Some(crate::cache_savings::analyze_cache_savings(
-            &messages, &turns, pricing,
-        ));
         let summary = summarize_session(session_id, &messages, pricing, subagent_cost, subagent_count);
+        // Cache-savings analyzer needs a single pricing — use the session's
+        // detected model (last-seen). Falls back to default when unknown.
+        let savings_pricing = pricing.for_model(summary.model.as_deref().unwrap_or(""));
+        let cache_savings = Some(crate::cache_savings::analyze_cache_savings(
+            &messages, &turns, &savings_pricing,
+        ));
         return Some(SessionDetail { summary, turns, content_analysis, cache_savings });
     }
 
@@ -701,15 +723,15 @@ fn count_jsonl_files(projects_dir: &PathBuf) -> usize {
         .unwrap_or(0)
 }
 
-pub fn load_claude_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
+pub fn load_claude_sessions(pricing: &PricingTable) -> Vec<SessionSummary> {
     load_claude_sessions_inner(pricing, false)
 }
 
-pub fn load_claude_sessions_force(pricing: &PricingInfo) -> Vec<SessionSummary> {
+pub fn load_claude_sessions_force(pricing: &PricingTable) -> Vec<SessionSummary> {
     load_claude_sessions_inner(pricing, true)
 }
 
-fn load_claude_sessions_inner(pricing: &PricingInfo, force: bool) -> Vec<SessionSummary> {
+fn load_claude_sessions_inner(pricing: &PricingTable, force: bool) -> Vec<SessionSummary> {
     let projects_dir = match get_claude_projects_dir() {
         Some(d) => d,
         None => return vec![],
@@ -842,18 +864,31 @@ fn parse_codex_rollout(path: &str) -> Option<CodexTokenUsage> {
             usage.last_timestamp = Some(ts.clone());
         }
 
-        // Count user messages
-        let event_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if event_type == "user_message" {
-            usage.message_count += 1;
+        // Capture the model from session_meta or turn_context (last one wins
+        // — turn_context fires more often and reflects in-session switches).
+        let outer_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if outer_type == "session_meta" || outer_type == "turn_context" {
+            if let Some(m) = v.get("payload").and_then(|p| p.get("model")).and_then(|v| v.as_str()) {
+                if !m.is_empty() {
+                    usage.model = Some(m.to_string());
+                }
+            }
         }
 
-        // Extract token_count from nested event_msg payload
+        // Count user-initiated turns. The top-level type is always
+        // "event_msg"/"response_item"/"session_meta"/"turn_context", so we
+        // must look at payload.type — comparing against the outer type here
+        // was always false and left message_count at 0.
         let payload_type = v
             .get("payload")
             .and_then(|p| p.get("type"))
             .and_then(|t| t.as_str())
             .unwrap_or("");
+        if payload_type == "user_message" {
+            usage.message_count += 1;
+        }
+
+        // Extract token_count from nested event_msg payload
         if payload_type != "token_count" {
             continue;
         }
@@ -890,7 +925,7 @@ fn parse_codex_rollout(path: &str) -> Option<CodexTokenUsage> {
     }
 }
 
-pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
+pub fn load_codex_sessions(pricing: &PricingTable) -> Vec<SessionSummary> {
     let codex_dir = match get_codex_dir() {
         Some(d) => d,
         None => return vec![],
@@ -946,7 +981,7 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
                 .as_deref()
                 .and_then(parse_codex_rollout);
 
-            let (input_tokens, output_tokens, cache_read_tokens, message_count, first_ts, last_ts) =
+            let (input_tokens, output_tokens, cache_read_tokens, message_count, first_ts, last_ts, model) =
                 if let Some(ref usage) = rollout_usage {
                     // OpenAI's input_tokens INCLUDES cached_input_tokens as a subset,
                     // but Claude's input_tokens is non-cached only.
@@ -959,13 +994,14 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
                         usage.message_count,
                         usage.first_timestamp.clone().or(row.created_at.clone()),
                         usage.last_timestamp.clone().or(row.created_at.clone()),
+                        usage.model.clone(),
                     )
                 } else {
                     // Fallback: estimate from SQLite tokens_used
                     let tokens = row.tokens_used.unwrap_or(0);
                     let estimated_input = (tokens as f64 * 0.7) as u64;
                     let estimated_output = tokens - estimated_input;
-                    (estimated_input, estimated_output, 0u64, 0u32, row.created_at.clone(), row.created_at.clone())
+                    (estimated_input, estimated_output, 0u64, 0u32, row.created_at.clone(), row.created_at.clone(), None)
                 };
 
             let total_context = cache_read_tokens + input_tokens;
@@ -975,7 +1011,8 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
                 0.0
             };
 
-            let cost = pricing.calculate_cost(input_tokens, 0, cache_read_tokens, output_tokens);
+            let pricing_info = pricing.for_model(model.as_deref().unwrap_or("gpt-5"));
+            let cost = pricing_info.calculate_cost(input_tokens, 0, cache_read_tokens, output_tokens);
 
             sessions.push(SessionSummary {
                 session_id: row.id,
@@ -989,11 +1026,13 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
                 total_cache_read_tokens: cache_read_tokens,
                 cache_hit_rate,
                 estimated_cost_usd: cost.total_cost,
+                cost_breakdown: cost,
                 first_timestamp: first_ts,
                 last_timestamp: last_ts,
                 subagent_count: 0,
                 subagent_cost_usd: 0.0,
                 source: "codex".to_string(),
+                model,
                 ephemeral_5m_tokens: 0,
                 ephemeral_1h_tokens: 0,
             });
@@ -1003,12 +1042,13 @@ pub fn load_codex_sessions(pricing: &PricingInfo) -> Vec<SessionSummary> {
     sessions
 }
 
-pub fn build_overview(sessions: &[SessionSummary], pricing: &PricingInfo) -> OverviewMetrics {
+pub fn build_overview(sessions: &[SessionSummary]) -> OverviewMetrics {
     let mut total_input = 0u64;
     let mut total_output = 0u64;
     let mut total_cache_write = 0u64;
     let mut total_cache_read = 0u64;
     let mut total_cost = 0.0f64;
+    let mut cost_breakdown = CostBreakdown::default();
     let mut project_map: HashMap<String, Vec<&SessionSummary>> = HashMap::new();
     let mut daily_map: HashMap<String, DailyCost> = HashMap::new();
 
@@ -1021,6 +1061,7 @@ pub fn build_overview(sessions: &[SessionSummary], pricing: &PricingInfo) -> Ove
         total_cache_write += session.total_cache_write_tokens;
         total_cache_read += session.total_cache_read_tokens;
         total_cost += session.estimated_cost_usd;
+        cost_breakdown.add(&session.cost_breakdown);
 
         // Group by project
         let project_key = if session.project.is_empty() {
@@ -1039,6 +1080,7 @@ pub fn build_overview(sessions: &[SessionSummary], pricing: &PricingInfo) -> Ove
             let entry = daily_map.entry(date.clone()).or_insert(DailyCost {
                 date,
                 cost_usd: 0.0,
+                cost_breakdown: CostBreakdown::default(),
                 input_tokens: 0,
                 output_tokens: 0,
                 cache_write_tokens: 0,
@@ -1046,6 +1088,7 @@ pub fn build_overview(sessions: &[SessionSummary], pricing: &PricingInfo) -> Ove
                 source: session.source.clone(),
             });
             entry.cost_usd += session.estimated_cost_usd;
+            entry.cost_breakdown.add(&session.cost_breakdown);
             entry.input_tokens += session.total_input_tokens;
             entry.output_tokens += session.total_output_tokens;
             entry.cache_write_tokens += session.total_cache_write_tokens;
@@ -1065,8 +1108,6 @@ pub fn build_overview(sessions: &[SessionSummary], pricing: &PricingInfo) -> Ove
     } else {
         0.0
     };
-
-    let cost_breakdown = pricing.calculate_cost(total_input, total_cache_write, total_cache_read, total_output);
 
     let mut project_summaries: Vec<ProjectSummary> = project_map
         .iter()
@@ -1118,4 +1159,481 @@ pub fn build_overview(sessions: &[SessionSummary], pricing: &PricingInfo) -> Ove
         project_summaries,
         top_sessions,
     }
+}
+
+/// Look up a Codex thread row by session id.
+fn lookup_codex_thread(session_id: &str) -> Option<CodexThread> {
+    let db_path = get_codex_dir()?.join("state_5.sqlite");
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, tokens_used, model_provider, title, cwd, created_at, git_branch, rollout_path \
+         FROM threads WHERE id = ?1 LIMIT 1",
+    ).ok()?;
+    let mut rows = stmt
+        .query_map(rusqlite::params![session_id], |row| {
+            let created_at_unix: Option<i64> = row.get(5)?;
+            let created_at = created_at_unix.map(|ts| {
+                chrono::DateTime::from_timestamp(ts, 0)
+                    .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+                    .unwrap_or_default()
+            });
+            Ok(CodexThread {
+                id: row.get(0)?,
+                tokens_used: row.get(1)?,
+                model_provider: row.get(2)?,
+                title: row.get(3)?,
+                cwd: row.get(4)?,
+                created_at,
+                git_branch: row.get(6)?,
+                rollout_path: row.get(7)?,
+            })
+        })
+        .ok()?;
+    rows.next()?.ok()
+}
+
+fn classify_codex_function(name: &str) -> &'static str {
+    let lower = name.to_ascii_lowercase();
+    // Common Codex tool names: exec_command, apply_patch, shell, read_file, etc.
+    if lower.contains("exec") || lower.contains("shell") || lower.contains("bash") || lower.contains("terminal") {
+        return "Shell Commands";
+    }
+    if lower.contains("apply_patch") || lower.contains("write") || lower.contains("edit") || lower.contains("patch") {
+        return "File Edits";
+    }
+    if lower.contains("read") || lower.contains("view_file") || lower.contains("open") {
+        return "File Reads";
+    }
+    if lower.contains("grep") || lower.contains("search") || lower.contains("glob") || lower.contains("find") {
+        return "Code Search";
+    }
+    if lower.contains("fetch") || lower.contains("web") || lower.contains("http") || lower.contains("url") {
+        return "Web Content";
+    }
+    if lower.starts_with('_') || lower.contains("mcp") || lower.contains("connector") {
+        return "External Tools";
+    }
+    "Other Tools"
+}
+
+fn codex_function_source(name: &str, arguments: &serde_json::Value) -> Option<String> {
+    // `arguments` is either a string (JSON-encoded) or already an object.
+    let parsed: serde_json::Value = match arguments {
+        serde_json::Value::String(s) => serde_json::from_str(s).unwrap_or(serde_json::Value::Null),
+        v => v.clone(),
+    };
+    let obj = parsed.as_object()?;
+    let lower = name.to_ascii_lowercase();
+    let val = if lower.contains("exec") || lower.contains("shell") || lower.contains("bash") {
+        obj.get("cmd").or_else(|| obj.get("command")).and_then(|v| v.as_str())
+    } else if lower.contains("read") || lower.contains("write") || lower.contains("edit") || lower.contains("patch") || lower.contains("view_file") {
+        obj.get("path").or_else(|| obj.get("file_path")).and_then(|v| v.as_str())
+    } else if lower.contains("fetch") || lower.contains("web") || lower.contains("http") || lower.contains("url") {
+        obj.get("url").or_else(|| obj.get("uri")).and_then(|v| v.as_str())
+    } else if lower.contains("grep") || lower.contains("search") || lower.contains("glob") || lower.contains("find") {
+        obj.get("pattern").or_else(|| obj.get("query")).and_then(|v| v.as_str())
+    } else {
+        obj.get("path")
+            .or_else(|| obj.get("file_path"))
+            .or_else(|| obj.get("url"))
+            .or_else(|| obj.get("cmd"))
+            .or_else(|| obj.get("command"))
+            .and_then(|v| v.as_str())
+    };
+    val.map(|s| if s.len() > 120 { format!("{}...", &s[..117]) } else { s.to_string() })
+}
+
+fn codex_text_preview(text: &str, max_len: usize) -> String {
+    let trimmed = text.trim().replace('\n', " ");
+    if trimmed.chars().count() > max_len {
+        let truncated: String = trimmed.chars().take(max_len.saturating_sub(3)).collect();
+        format!("{}...", truncated)
+    } else {
+        trimmed
+    }
+}
+
+fn extract_codex_message_text(payload: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let Some(arr) = payload.get("content").and_then(|c| c.as_array()) {
+        for item in arr {
+            if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(t);
+            } else if let Some(t) = item.get("content").and_then(|v| v.as_str()) {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(t);
+            }
+        }
+    }
+    out
+}
+
+struct CodexParsed {
+    summary: SessionSummary,
+    turns: Vec<TurnMetrics>,
+    content: ContentAnalysis,
+}
+
+fn parse_codex_rollout_detail(
+    thread: &CodexThread,
+    pricing: &PricingTable,
+) -> Option<CodexParsed> {
+    let path = thread.rollout_path.as_deref()?;
+    let file = fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    let mut turns: Vec<TurnMetrics> = Vec::new();
+    let mut turn_index: u32 = 0;
+    let mut prev_total_in: u64 = 0;
+    let mut prev_total_cached: u64 = 0;
+    let mut prev_total_out: u64 = 0;
+    let mut prev_total_reasoning: u64 = 0;
+    let mut cost_breakdown = CostBreakdown::default();
+
+    let mut model: Option<String> = None;
+    let mut message_count: u32 = 0;
+    let mut first_ts: Option<String> = None;
+    let mut last_ts: Option<String> = None;
+    let mut title: Option<String> = thread.title.clone();
+    if title.as_deref() == Some("") { title = None; }
+
+    // Content blocks (we increment a "turn marker" approximating per-user-turn)
+    struct Block {
+        category: &'static str,
+        subcategory: Option<String>,
+        tool_name: Option<String>,
+        source: Option<String>,
+        byte_size: u64,
+        preview: String,
+        full_content: String,
+        turn_index: u32,
+    }
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut content_turn_index: u32 = 0;
+
+    // Latest cumulative totals so we can fall back if no token_count events fire.
+    let mut latest_total_in: u64 = 0;
+    let mut latest_total_cached: u64 = 0;
+    let mut latest_total_out: u64 = 0;
+
+    for line in reader.lines() {
+        let line = match line { Ok(l) => l, Err(_) => continue };
+        let trimmed = line.trim();
+        if trimmed.is_empty() { continue; }
+        let v: serde_json::Value = match serde_json::from_str(trimmed) { Ok(v) => v, Err(_) => continue };
+
+        let ts = v.get("timestamp").and_then(|t| t.as_str()).map(|s| s.to_string());
+        if let Some(ref t) = ts {
+            if first_ts.is_none() { first_ts = Some(t.clone()); }
+            last_ts = Some(t.clone());
+        }
+
+        let outer_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let payload = v.get("payload");
+        let payload_type = payload.and_then(|p| p.get("type")).and_then(|t| t.as_str()).unwrap_or("");
+
+        // Capture model from session_meta or turn_context (last wins so
+        // mid-session model switches are reflected).
+        if outer_type == "session_meta" || outer_type == "turn_context" {
+            if let Some(m) = payload.and_then(|p| p.get("model")).and_then(|v| v.as_str()) {
+                if !m.is_empty() {
+                    model = Some(m.to_string());
+                }
+            }
+        }
+
+        // Token usage: build per-call turn metrics
+        if payload_type == "token_count" {
+            let info = match payload.and_then(|p| p.get("info")) {
+                Some(i) if !i.is_null() => i,
+                _ => continue,
+            };
+            let total = match info.get("total_token_usage") { Some(u) => u, None => continue };
+            let cur_total_in = total.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(prev_total_in);
+            let cur_total_cached = total.get("cached_input_tokens").and_then(|v| v.as_u64()).unwrap_or(prev_total_cached);
+            let cur_total_out = total.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(prev_total_out);
+            let cur_total_reasoning = total.get("reasoning_output_tokens").and_then(|v| v.as_u64()).unwrap_or(prev_total_reasoning);
+
+            // Use the delta vs previous cumulative as this turn's usage. OpenAI's
+            // `last_token_usage` field is also present but the delta is more
+            // robust against missing intermediate events.
+            let delta_in_raw = cur_total_in.saturating_sub(prev_total_in);
+            let delta_cached = cur_total_cached.saturating_sub(prev_total_cached);
+            let delta_out = cur_total_out.saturating_sub(prev_total_out);
+            let delta_reasoning = cur_total_reasoning.saturating_sub(prev_total_reasoning);
+
+            // OpenAI's input_tokens already includes cached_input_tokens.
+            let delta_input_noncached = delta_in_raw.saturating_sub(delta_cached);
+
+            let total_ctx_turn = delta_input_noncached + delta_cached;
+            let hit_rate = if total_ctx_turn > 0 {
+                delta_cached as f64 / total_ctx_turn as f64
+            } else { 0.0 };
+            // Price each token_count event with the currently observed model
+            // — turn_context (and therefore model) can change mid-session.
+            let pricing_info = pricing.for_model(model.as_deref().unwrap_or("gpt-5"));
+            let cost = pricing_info.calculate_cost(delta_input_noncached, 0, delta_cached, delta_out + delta_reasoning);
+            cost_breakdown.add(&cost);
+
+            turns.push(TurnMetrics {
+                turn_index,
+                role: "assistant".to_string(),
+                input_tokens: delta_input_noncached,
+                output_tokens: delta_out + delta_reasoning,
+                cache_write_tokens: 0,
+                cache_read_tokens: delta_cached,
+                cumulative_context: cur_total_in,
+                cache_hit_rate: hit_rate,
+                cost_usd: cost.total_cost,
+                timestamp: ts.clone(),
+            });
+            turn_index += 1;
+
+            prev_total_in = cur_total_in;
+            prev_total_cached = cur_total_cached;
+            prev_total_out = cur_total_out;
+            prev_total_reasoning = cur_total_reasoning;
+            latest_total_in = cur_total_in;
+            latest_total_cached = cur_total_cached;
+            latest_total_out = cur_total_out;
+            continue;
+        }
+
+        if payload_type == "user_message" {
+            message_count += 1;
+            // Advance the content turn pointer at each user turn
+            content_turn_index = content_turn_index.saturating_add(1);
+            // Capture title from the first user message if SQLite didn't have one
+            if title.is_none() {
+                if let Some(text) = payload.and_then(|p| p.get("message")).and_then(|v| v.as_str()) {
+                    let t = text.trim();
+                    if !t.is_empty() && !t.starts_with('<') {
+                        let cut: String = t.chars().take(97).collect();
+                        let truncated = if t.chars().count() > 100 { format!("{}...", cut) } else { t.to_string() };
+                        title = Some(truncated.replace('\n', " "));
+                    }
+                }
+            }
+        }
+
+        // Content classification from response_item events
+        if outer_type == "response_item" {
+            let p = match payload { Some(p) => p, None => continue };
+            match payload_type {
+                "message" => {
+                    let role = p.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    let text = extract_codex_message_text(p);
+                    if text.is_empty() { continue; }
+                    let category = match role {
+                        "user" => "User Prompts",
+                        "assistant" => "Assistant Text",
+                        "developer" | "system" => "Other",
+                        _ => "Other",
+                    };
+                    blocks.push(Block {
+                        category,
+                        subcategory: None,
+                        tool_name: None,
+                        source: None,
+                        byte_size: text.len() as u64,
+                        preview: codex_text_preview(&text, 80),
+                        full_content: text,
+                        turn_index: content_turn_index.saturating_sub(1),
+                    });
+                }
+                "function_call" => {
+                    let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                    let cat = classify_codex_function(&name);
+                    let args = p.get("arguments").cloned().unwrap_or(serde_json::Value::Null);
+                    let src = codex_function_source(&name, &args);
+                    let args_str = match &args {
+                        serde_json::Value::String(s) => s.clone(),
+                        _ => serde_json::to_string_pretty(&args).unwrap_or_default(),
+                    };
+                    let preview_src = src.clone().unwrap_or_else(|| codex_text_preview(&args_str, 80));
+                    blocks.push(Block {
+                        category: cat,
+                        subcategory: None,
+                        tool_name: Some(name),
+                        source: src,
+                        byte_size: args_str.len() as u64,
+                        preview: preview_src,
+                        full_content: args_str,
+                        turn_index: content_turn_index.saturating_sub(1),
+                    });
+                }
+                "function_call_output" => {
+                    // Output may be a string or an object; flatten to string.
+                    let output_val = p.get("output").cloned().unwrap_or(serde_json::Value::Null);
+                    let output_str = match &output_val {
+                        serde_json::Value::String(s) => s.clone(),
+                        _ => serde_json::to_string_pretty(&output_val).unwrap_or_default(),
+                    };
+                    // We don't have the originating tool name here, but Codex
+                    // function call outputs are dominated by exec_command shell
+                    // output — bucket as "Shell Commands" unless we later
+                    // generalize this with a call_id → name map.
+                    blocks.push(Block {
+                        category: "Shell Commands",
+                        subcategory: None,
+                        tool_name: None,
+                        source: None,
+                        byte_size: output_str.len() as u64,
+                        preview: codex_text_preview(&output_str, 80),
+                        full_content: output_str,
+                        turn_index: content_turn_index.saturating_sub(1),
+                    });
+                }
+                "reasoning" => {
+                    let summary_text = p.get("summary").and_then(|v| {
+                        if let Some(arr) = v.as_array() {
+                            Some(arr.iter().filter_map(|s| s.as_str()).collect::<Vec<_>>().join("\n"))
+                        } else { v.as_str().map(|s| s.to_string()) }
+                    }).unwrap_or_default();
+                    let content_text = p.get("content").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default();
+                    let encrypted_len = p.get("encrypted_content").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0);
+                    let display = if !summary_text.is_empty() { summary_text }
+                        else if !content_text.is_empty() { content_text }
+                        else if encrypted_len > 0 { format!("[encrypted reasoning: {} bytes]", encrypted_len) }
+                        else { continue };
+                    blocks.push(Block {
+                        category: "Thinking",
+                        subcategory: None,
+                        tool_name: None,
+                        source: None,
+                        byte_size: display.len() as u64,
+                        preview: codex_text_preview(&display, 80),
+                        full_content: display,
+                        turn_index: content_turn_index.saturating_sub(1),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Aggregate content into categories
+    let mut cat_map: HashMap<String, (u64, u32, Option<String>)> = HashMap::new();
+    let total_bytes: u64 = blocks.iter().map(|b| b.byte_size).sum();
+    let total_estimated_tokens = total_bytes / 4;
+    for b in &blocks {
+        let key = b.category.to_string();
+        let e = cat_map.entry(key).or_insert((0, 0, b.subcategory.clone()));
+        e.0 += b.byte_size;
+        e.1 += 1;
+    }
+    let mut categories: Vec<ContentCategory> = cat_map.into_iter().map(|(name, (bytes, count, sub))| {
+        let est = bytes / 4;
+        let pct = if total_estimated_tokens > 0 { est as f64 / total_estimated_tokens as f64 * 100.0 } else { 0.0 };
+        ContentCategory { category: name, subcategory: sub, estimated_tokens: est, byte_size: bytes, count, percentage: pct }
+    }).collect();
+    categories.sort_by(|a, b| b.estimated_tokens.cmp(&a.estimated_tokens));
+
+    let mut block_indices: Vec<usize> = (0..blocks.len()).collect();
+    block_indices.sort_by(|&a, &b| blocks[b].byte_size.cmp(&blocks[a].byte_size));
+    let all_items: Vec<ContentItem> = block_indices.into_iter().map(|i| {
+        let b = &blocks[i];
+        ContentItem {
+            category: b.category.to_string(),
+            tool_name: b.tool_name.clone(),
+            source: b.source.clone(),
+            estimated_tokens: b.byte_size / 4,
+            preview: b.preview.clone(),
+            full_content: b.full_content.clone(),
+            turn_index: b.turn_index,
+        }
+    }).collect();
+
+    // Suggestions reuse the same thresholds as Claude
+    let mut suggestions: Vec<String> = Vec::new();
+    let mut cat_pct: HashMap<&str, f64> = HashMap::new();
+    for c in &categories { *cat_pct.entry(c.category.as_str()).or_insert(0.0) += c.percentage; }
+    if cat_pct.get("Shell Commands").copied().unwrap_or(0.0) > 40.0 {
+        suggestions.push("Shell command output dominates context. Trim noisy command output or paginate with head/tail.".to_string());
+    }
+    if cat_pct.get("File Reads").copied().unwrap_or(0.0) > 30.0 {
+        suggestions.push("File reads use a large share of context. Prefer targeted grep/sed slices.".to_string());
+    }
+
+    // If we never saw a token_count event, fall back to the totals on the row
+    let (final_input, final_cached, final_out, final_cost) = if turns.is_empty() {
+        let tokens = thread.tokens_used.unwrap_or(0);
+        let est_input = (tokens as f64 * 0.7) as u64;
+        let est_out = tokens.saturating_sub(est_input);
+        let pricing_info = pricing.for_model(model.as_deref().unwrap_or("gpt-5"));
+        let cost = pricing_info.calculate_cost(est_input, 0, 0, est_out);
+        (est_input, 0u64, est_out, cost)
+    } else {
+        (
+            latest_total_in.saturating_sub(latest_total_cached),
+            latest_total_cached,
+            latest_total_out,
+            cost_breakdown.clone(),
+        )
+    };
+
+    let total_ctx = final_input + final_cached;
+    let cache_hit_rate = if total_ctx > 0 { final_cached as f64 / total_ctx as f64 } else { 0.0 };
+
+    let summary = SessionSummary {
+        session_id: thread.id.clone(),
+        project: normalize_project_path(thread.cwd.as_deref().unwrap_or("")),
+        git_branch: thread.git_branch.clone(),
+        title,
+        message_count: message_count.max(turns.len() as u32),
+        total_input_tokens: final_input,
+        total_output_tokens: final_out,
+        total_cache_write_tokens: 0,
+        total_cache_read_tokens: final_cached,
+        cache_hit_rate,
+        estimated_cost_usd: final_cost.total_cost,
+        cost_breakdown: final_cost,
+        first_timestamp: first_ts.or_else(|| thread.created_at.clone()),
+        last_timestamp: last_ts.or_else(|| thread.created_at.clone()),
+        subagent_count: 0,
+        subagent_cost_usd: 0.0,
+        source: "codex".to_string(),
+        model,
+        ephemeral_5m_tokens: 0,
+        ephemeral_1h_tokens: 0,
+    };
+
+    Some(CodexParsed {
+        summary,
+        turns,
+        content: ContentAnalysis { categories, total_estimated_tokens, all_items, suggestions },
+    })
+}
+
+pub fn get_codex_session_detail(session_id: &str, pricing: &PricingTable) -> Option<SessionDetail> {
+    let thread = lookup_codex_thread(session_id)?;
+    let parsed = parse_codex_rollout_detail(&thread, pricing)?;
+    Some(SessionDetail {
+        summary: parsed.summary,
+        turns: parsed.turns,
+        content_analysis: Some(parsed.content),
+        // Codex has no separate cache_write step, so the savings analyzer
+        // (which targets cache writes / invalidations) doesn't apply.
+        cache_savings: None,
+    })
+}
+
+/// Dispatches to the correct backend based on which store has the session.
+pub fn get_session_detail_any(session_id: &str, pricing: &PricingTable) -> Option<SessionDetail> {
+    if let Some(d) = get_session_detail(session_id, pricing) {
+        return Some(d);
+    }
+    get_codex_session_detail(session_id, pricing)
 }

@@ -3,14 +3,14 @@ pub mod cli;
 pub mod models;
 pub mod parser;
 
-use models::{OverviewMetrics, PricingInfo, SessionDetail, SessionSummary};
+use models::{OverviewMetrics, SessionDetail, SessionSummary};
 
 #[tauri::command]
 async fn get_overview() -> OverviewMetrics {
     let pricing = parser::get_cached_pricing();
     let mut sessions = parser::load_claude_sessions(pricing);
     sessions.extend(parser::load_codex_sessions(pricing));
-    parser::build_overview(&sessions, pricing)
+    parser::build_overview(&sessions)
 }
 
 #[tauri::command]
@@ -32,12 +32,7 @@ async fn refresh_sessions() -> Vec<SessionSummary> {
 #[tauri::command]
 async fn get_session_detail(session_id: String) -> Option<SessionDetail> {
     let pricing = parser::get_cached_pricing();
-    parser::get_session_detail(&session_id, pricing)
-}
-
-#[tauri::command]
-fn get_pricing() -> PricingInfo {
-    parser::get_cached_pricing().clone()
+    parser::get_session_detail_any(&session_id, pricing)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,7 +43,6 @@ pub fn run() {
             get_sessions,
             refresh_sessions,
             get_session_detail,
-            get_pricing,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

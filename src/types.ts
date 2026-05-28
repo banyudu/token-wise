@@ -18,11 +18,13 @@ export interface SessionSummary {
   total_cache_read_tokens: number;
   cache_hit_rate: number;
   estimated_cost_usd: number;
+  cost_breakdown: CostBreakdown;
   first_timestamp: string | null;
   last_timestamp: string | null;
   subagent_count: number;
   subagent_cost_usd: number;
   source: string;
+  model: string | null;
   ephemeral_5m_tokens: number;
   ephemeral_1h_tokens: number;
 }
@@ -41,6 +43,7 @@ export interface ProjectSummary {
 export interface DailyCost {
   date: string;
   cost_usd: number;
+  cost_breakdown: CostBreakdown;
   input_tokens: number;
   output_tokens: number;
   cache_write_tokens: number;
@@ -152,9 +155,3 @@ export interface SessionDetail {
   cache_savings: CacheSavingsReport | null;
 }
 
-export interface PricingInfo {
-  input_per_mtok: number;
-  cache_write_per_mtok: number;
-  cache_read_per_mtok: number;
-  output_per_mtok: number;
-}
