@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { invoke } from "@tauri-apps/api/core";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
-import type { OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem, CacheSavingsReport } from "./types";
+import type { CostBreakdown, OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem, CacheSavingsReport } from "./types";
 import { codeToHtml } from "shiki";
 import ReactMarkdown from "react-markdown";
 import { LoadingScreen } from "./LoadingScreen";
@@ -14,16 +14,27 @@ type SortField = "cost" | "date" | "input" | "output" | "cache_write" | "cache_r
 type SortDir = "asc" | "desc";
 type DateRange = "7d" | "30d" | "90d" | "all" | "custom";
 
-type ModelPricing = { label: string; input: number; output: number; cacheWrite: number; cacheRead: number };
-
-const MODEL_PRICING: Record<string, ModelPricing> = {
-  opus:       { label: "Opus 4",     input: 15.0,  output: 75.0,  cacheWrite: 18.75, cacheRead: 1.50 },
-  sonnet:     { label: "Sonnet 4",   input: 3.0,   output: 15.0,  cacheWrite: 3.75,  cacheRead: 0.30 },
-  haiku:      { label: "Haiku 3.5",  input: 0.80,  output: 4.0,   cacheWrite: 1.0,   cacheRead: 0.08 },
-  "gpt-5.4":  { label: "GPT-5.4",   input: 2.50,  output: 10.0,  cacheWrite: 0,     cacheRead: 0 },
-  "gpt-5.2":  { label: "GPT-5.2",   input: 1.25,  output: 5.0,   cacheWrite: 0,     cacheRead: 0 },
-  "gpt-4.1":  { label: "GPT-4.1",   input: 2.0,   output: 8.0,   cacheWrite: 0,     cacheRead: 0 },
+const EMPTY_BREAKDOWN: CostBreakdown = {
+  input_cost: 0, output_cost: 0, cache_write_cost: 0, cache_read_cost: 0, total_cost: 0,
 };
+
+function addBreakdown(a: CostBreakdown, b: CostBreakdown): CostBreakdown {
+  return {
+    input_cost: a.input_cost + b.input_cost,
+    output_cost: a.output_cost + b.output_cost,
+    cache_write_cost: a.cache_write_cost + b.cache_write_cost,
+    cache_read_cost: a.cache_read_cost + b.cache_read_cost,
+    total_cost: a.total_cost + b.total_cost,
+  };
+}
+
+// Strip the dated suffix and `claude-`/`anthropic-` prefix for display.
+function displayModel(model: string | null | undefined): string | null {
+  if (!model) return null;
+  let m = model.replace(/^(?:claude-|anthropic\.)/i, "");
+  m = m.replace(/-\d{8}$/, ""); // drop trailing YYYYMMDD
+  return m;
+}
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -84,41 +95,47 @@ function filterByDateRange(sessions: SessionSummary[], range: DateRange, customF
   return sessions.filter((s) => (s.first_timestamp ?? "") >= cutoffStr);
 }
 
-function getModelPricing(model: string): ModelPricing {
-  return MODEL_PRICING[model] ?? MODEL_PRICING.sonnet;
-}
-
-function calcSessionCost(s: SessionSummary, p: ModelPricing): number {
-  return (s.total_input_tokens / 1e6) * p.input + (s.total_output_tokens / 1e6) * p.output +
-    (s.total_cache_write_tokens / 1e6) * p.cacheWrite + (s.total_cache_read_tokens / 1e6) * p.cacheRead;
-}
-
-function computeOverview(sessions: SessionSummary[], model: string = "sonnet"): OverviewMetrics {
-  const p = getModelPricing(model);
+// All cost computation lives in the Rust backend — each session/turn already
+// carries its detected model's pricing. The frontend just aggregates the
+// per-session breakdowns the backend gave us.
+function computeOverview(sessions: SessionSummary[]): OverviewMetrics {
   let totalInput = 0, totalOutput = 0, totalCacheWrite = 0, totalCacheRead = 0, totalCost = 0;
+  let breakdown: CostBreakdown = { ...EMPTY_BREAKDOWN };
   const projectMap = new Map<string, SessionSummary[]>();
-  const dailyMap = new Map<string, { cost: number; input: number; output: number; cw: number; cr: number; source: string }>();
+  const dailyMap = new Map<string, { cost: number; bd: CostBreakdown; input: number; output: number; cw: number; cr: number; source: string }>();
   let systemOverhead = 0;
 
   for (const s of sessions) {
-    const sessionCost = calcSessionCost(s, p);
     totalInput += s.total_input_tokens;
     totalOutput += s.total_output_tokens;
     totalCacheWrite += s.total_cache_write_tokens;
     totalCacheRead += s.total_cache_read_tokens;
-    totalCost += sessionCost;
+    totalCost += s.estimated_cost_usd;
+    breakdown = addBreakdown(breakdown, s.cost_breakdown);
     const key = s.project || "unknown";
     if (!projectMap.has(key)) projectMap.set(key, []);
     projectMap.get(key)!.push(s);
     if (s.first_timestamp) {
       const date = s.first_timestamp.slice(0, 10);
-      const d = dailyMap.get(date) ?? { cost: 0, input: 0, output: 0, cw: 0, cr: 0, source: s.source };
-      d.cost += sessionCost;
-      d.input += s.total_input_tokens;
-      d.output += s.total_output_tokens;
-      d.cw += s.total_cache_write_tokens;
-      d.cr += s.total_cache_read_tokens;
-      dailyMap.set(date, d);
+      const existing = dailyMap.get(date);
+      if (existing) {
+        existing.cost += s.estimated_cost_usd;
+        existing.bd = addBreakdown(existing.bd, s.cost_breakdown);
+        existing.input += s.total_input_tokens;
+        existing.output += s.total_output_tokens;
+        existing.cw += s.total_cache_write_tokens;
+        existing.cr += s.total_cache_read_tokens;
+      } else {
+        dailyMap.set(date, {
+          cost: s.estimated_cost_usd,
+          bd: { ...s.cost_breakdown },
+          input: s.total_input_tokens,
+          output: s.total_output_tokens,
+          cw: s.total_cache_write_tokens,
+          cr: s.total_cache_read_tokens,
+          source: s.source,
+        });
+      }
     }
     if (s.source === "claude" && s.total_cache_write_tokens > systemOverhead) {
       systemOverhead = s.total_cache_write_tokens;
@@ -126,27 +143,22 @@ function computeOverview(sessions: SessionSummary[], model: string = "sonnet"): 
   }
 
   const totalCtx = totalCacheRead + totalCacheWrite + totalInput;
-  const inputCost = (totalInput / 1e6) * p.input;
-  const outputCost = (totalOutput / 1e6) * p.output;
-  const cwCost = (totalCacheWrite / 1e6) * p.cacheWrite;
-  const crCost = (totalCacheRead / 1e6) * p.cacheRead;
 
   const projectSummaries: ProjectSummary[] = Array.from(projectMap.entries()).map(([proj, sess]) => {
     const pi = sess.reduce((a, s) => a + s.total_input_tokens, 0);
     const po = sess.reduce((a, s) => a + s.total_output_tokens, 0);
     const pcw = sess.reduce((a, s) => a + s.total_cache_write_tokens, 0);
     const pcr = sess.reduce((a, s) => a + s.total_cache_read_tokens, 0);
-    const pc = (pi / 1e6) * p.input + (po / 1e6) * p.output + (pcw / 1e6) * p.cacheWrite + (pcr / 1e6) * p.cacheRead;
+    const pc = sess.reduce((a, s) => a + s.estimated_cost_usd, 0);
     const ptc = pcr + pcw + pi;
     return { project: proj, session_count: sess.length, total_cost_usd: pc, total_input_tokens: pi, total_output_tokens: po, total_cache_write_tokens: pcw, total_cache_read_tokens: pcr, avg_cache_hit_rate: ptc > 0 ? pcr / ptc : 0 };
   }).sort((a, b) => b.total_cost_usd - a.total_cost_usd);
 
   const dailyCosts = Array.from(dailyMap.entries()).map(([date, d]) => ({
-    date, cost_usd: d.cost, input_tokens: d.input, output_tokens: d.output, cache_write_tokens: d.cw, cache_read_tokens: d.cr, source: d.source,
+    date, cost_usd: d.cost, cost_breakdown: d.bd, input_tokens: d.input, output_tokens: d.output, cache_write_tokens: d.cw, cache_read_tokens: d.cr, source: d.source,
   })).sort((a, b) => a.date.localeCompare(b.date));
 
   const topSessions = [...sessions]
-    .map((s) => ({ ...s, estimated_cost_usd: calcSessionCost(s, p) }))
     .sort((a, b) => b.estimated_cost_usd - a.estimated_cost_usd)
     .slice(0, 20);
 
@@ -154,7 +166,7 @@ function computeOverview(sessions: SessionSummary[], model: string = "sonnet"): 
     total_sessions: sessions.length, total_cost_usd: totalCost, total_input_tokens: totalInput, total_output_tokens: totalOutput,
     total_cache_write_tokens: totalCacheWrite, total_cache_read_tokens: totalCacheRead,
     avg_cache_hit_rate: totalCtx > 0 ? totalCacheRead / totalCtx : 0,
-    cost_breakdown: { input_cost: inputCost, output_cost: outputCost, cache_write_cost: cwCost, cache_read_cost: crCost, total_cost: inputCost + outputCost + cwCost + crCost },
+    cost_breakdown: breakdown,
     estimated_system_overhead_tokens: systemOverhead, daily_costs: dailyCosts, project_summaries: projectSummaries, top_sessions: topSessions,
   };
 }
@@ -242,48 +254,6 @@ function DateRangeSelector({ value, onChange, customFrom, customTo, onCustomFrom
   );
 }
 
-function ModelSelector({ value, onChange, sourceFilter }: { value: string; onChange: (v: string) => void; sourceFilter: string }) {
-  const [search, setSearch] = useState("");
-  const displayValue = value === "all" ? "All" : (MODEL_PRICING[value]?.label ?? value);
-
-  const modelEntries = useMemo(() => {
-    let entries = Object.entries(MODEL_PRICING);
-    if (sourceFilter === "claude") entries = entries.filter(([id]) => !id.startsWith("gpt"));
-    else if (sourceFilter === "codex") entries = entries.filter(([id]) => id.startsWith("gpt"));
-    return entries;
-  }, [sourceFilter]);
-
-  const filteredModels = useMemo(() => {
-    if (!search) return modelEntries;
-    return modelEntries.filter(([, p]) => p.label.toLowerCase().includes(search.toLowerCase()));
-  }, [modelEntries, search]);
-
-  const showSearch = modelEntries.length > 10;
-
-  return (
-    <FilterDropdown label="Model" value={displayValue} renderContent={(close) => (<>
-      <FilterOption selected={value === "all"} label="All"
-        tooltip="Average across all models"
-        onClick={() => { onChange("all"); close(); setSearch(""); }} />
-      {showSearch && (
-        <div className="px-3 pb-1 pt-1">
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search models..."
-            className="w-full px-2 py-1.5 text-[13px] rounded border border-[var(--color-border)] bg-[var(--color-surface)] text-inherit font-[inherit] outline-none focus:border-[var(--color-primary)]" />
-        </div>
-      )}
-      {filteredModels.map(([id, p]) => (
-        <FilterOption key={id} selected={value === id} label={p.label}
-          tooltip={`Input: $${p.input}/MTok · Output: $${p.output}/MTok${p.cacheWrite ? ` · Cache Write: $${p.cacheWrite}/MTok · Cache Read: $${p.cacheRead}/MTok` : ""}`}
-          onClick={() => { onChange(id); close(); setSearch(""); }} />
-      ))}
-      {filteredModels.length === 0 && (
-        <div className="px-3 py-2 text-[13px] text-[var(--color-muted)]">No models found</div>
-      )}
-    </>)} />
-  );
-}
-
 function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4">
@@ -322,7 +292,7 @@ function CostBar({ breakdown }: { breakdown: OverviewMetrics["cost_breakdown"] }
   );
 }
 
-function DailyCostChart({ dailyCosts, pricing }: { dailyCosts: OverviewMetrics["daily_costs"]; pricing: { input: number; output: number; cacheWrite: number; cacheRead: number } }) {
+function DailyCostChart({ dailyCosts }: { dailyCosts: OverviewMetrics["daily_costs"] }) {
   if (dailyCosts.length === 0) return null;
   const maxCost = Math.max(...dailyCosts.map((d) => d.cost_usd), 0.01);
   return (
@@ -330,18 +300,18 @@ function DailyCostChart({ dailyCosts, pricing }: { dailyCosts: OverviewMetrics["
       <h3 className="text-sm font-semibold mb-3">Daily Cost ({dailyCosts.length} days)</h3>
       <div className="flex gap-0.5">
         {dailyCosts.map((d) => {
-          const bd = { input: (d.input_tokens / 1e6) * pricing.input, output: (d.output_tokens / 1e6) * pricing.output, cache_write: (d.cache_write_tokens / 1e6) * pricing.cacheWrite, cache_read: (d.cache_read_tokens / 1e6) * pricing.cacheRead };
-          const barTotal = bd.input + bd.output + bd.cache_write + bd.cache_read;
+          const bd = d.cost_breakdown;
+          const barTotal = bd.input_cost + bd.output_cost + bd.cache_write_cost + bd.cache_read_cost;
           const heightPct = (d.cost_usd / maxCost) * 100;
           return (
             <div key={d.date} className="flex-1 flex flex-col items-center" title={`${d.date}: ${formatCost(d.cost_usd)}`}>
               <div className="w-full h-[120px] flex flex-col justify-end">
                 <div className="w-full flex flex-col rounded-t-sm overflow-hidden min-h-px" style={{ height: `${heightPct}%` }}>
                   {barTotal > 0 ? (<>
-                    <div className="w-full" style={{ flex: bd.output, backgroundColor: "var(--color-output)" }} />
-                    <div className="w-full" style={{ flex: bd.cache_write, backgroundColor: "var(--color-cache-write)" }} />
-                    <div className="w-full" style={{ flex: bd.input, backgroundColor: "var(--color-input)" }} />
-                    <div className="w-full" style={{ flex: bd.cache_read, backgroundColor: "var(--color-cache-read)" }} />
+                    <div className="w-full" style={{ flex: bd.output_cost, backgroundColor: "var(--color-output)" }} />
+                    <div className="w-full" style={{ flex: bd.cache_write_cost, backgroundColor: "var(--color-cache-write)" }} />
+                    <div className="w-full" style={{ flex: bd.input_cost, backgroundColor: "var(--color-input)" }} />
+                    <div className="w-full" style={{ flex: bd.cache_read_cost, backgroundColor: "var(--color-cache-read)" }} />
                   </>) : <div className="w-full" style={{ flex: 1, backgroundColor: "var(--color-primary)" }} />}
                 </div>
               </div>
@@ -431,7 +401,7 @@ function Recommendations({ sessions, overview }: { sessions: SessionSummary[]; o
   );
 }
 
-function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewMetrics; sessions: SessionSummary[]; pricing: ModelPricing }) {
+function SavingsPotential({ overview, sessions }: { overview: OverviewMetrics; sessions: SessionSummary[] }) {
   const distribution = useMemo(() => {
     const claudeSessions = sessions.filter((s) => s.source === "claude" && s.message_count > 0);
     if (claudeSessions.length === 0) return null;
@@ -464,6 +434,16 @@ function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewM
       shortSessionCount: shortSessions.length, shortSessionCost, excellent: true,
     };
 
+    // Approximate effective per-token rates from the actual breakdown — no
+    // model assumption needed since the backend already priced sessions with
+    // the right rates.
+    const inputRate = overview.total_input_tokens > 0
+      ? overview.cost_breakdown.input_cost / (overview.total_input_tokens / 1e6) : 3.0;
+    const cwRate = overview.total_cache_write_tokens > 0
+      ? overview.cost_breakdown.cache_write_cost / (overview.total_cache_write_tokens / 1e6) : 3.75;
+    const crRate = overview.total_cache_read_tokens > 0
+      ? overview.cost_breakdown.cache_read_cost / (overview.total_cache_read_tokens / 1e6) : 0.30;
+
     const targetRate = Math.min(currentCacheRate + 0.2, 0.85);
     const currentCacheReadTokens = overview.total_cache_read_tokens;
     const currentNonCacheTokens = overview.total_input_tokens + overview.total_cache_write_tokens;
@@ -476,9 +456,9 @@ function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewM
     const cwReduction = tokenShift * (1 - inputRatio);
 
     const currentCost = overview.cost_breakdown.total_cost;
-    const newInputCost = ((overview.total_input_tokens - inputReduction) / 1e6) * pricing.input;
-    const newCwCost = ((overview.total_cache_write_tokens - cwReduction) / 1e6) * pricing.cacheWrite;
-    const newCrCost = (targetCacheReadTokens / 1e6) * pricing.cacheRead;
+    const newInputCost = ((overview.total_input_tokens - inputReduction) / 1e6) * inputRate;
+    const newCwCost = ((overview.total_cache_write_tokens - cwReduction) / 1e6) * cwRate;
+    const newCrCost = (targetCacheReadTokens / 1e6) * crRate;
     const newOutputCost = overview.cost_breakdown.output_cost;
     const projectedCost = newInputCost + newCwCost + newCrCost + newOutputCost;
     const savedAmount = currentCost - projectedCost;
@@ -489,7 +469,7 @@ function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewM
       savedPercent: currentCost > 0 ? Math.max(0, savedAmount) / currentCost : 0,
       shortSessionCount: shortSessions.length, shortSessionCost, excellent: false,
     };
-  }, [overview, sessions, pricing]);
+  }, [overview, sessions]);
 
   if (!savings) return null;
 
@@ -556,11 +536,15 @@ function SavingsPotential({ overview, sessions, pricing }: { overview: OverviewM
   );
 }
 
-function ContextComposition({ overview, cacheWriteRate }: { overview: OverviewMetrics; cacheWriteRate: number }) {
+function ContextComposition({ overview }: { overview: OverviewMetrics }) {
   const totalContext = overview.total_input_tokens + overview.total_cache_write_tokens + overview.total_cache_read_tokens;
   if (totalContext === 0) return null;
   const overhead = overview.estimated_system_overhead_tokens;
-  const overheadCost = (overhead / 1_000_000) * cacheWriteRate * overview.total_sessions;
+  // Effective per-token cache-write rate derived from the actual breakdown.
+  const cwRate = overview.total_cache_write_tokens > 0
+    ? overview.cost_breakdown.cache_write_cost / (overview.total_cache_write_tokens / 1e6)
+    : 0;
+  const overheadCost = (overhead / 1_000_000) * cwRate * overview.total_sessions;
   const items = [
     { value: formatTokens(overhead), label: "System Overhead / Session", sub: "CLAUDE.md + skills + tools + system prompt" },
     { value: formatCost(overheadCost), label: "Est. Overhead Cost", sub: `across ${overview.total_sessions} sessions` },
@@ -619,10 +603,17 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
   const ROW_HEIGHT = 36;
 
   useEffect(() => {
-    if (tableRef.current) {
-      setScrollMargin(tableRef.current.offsetTop);
-    }
-  });
+    const el = tableRef.current;
+    if (!el) return;
+    const update = () => setScrollMargin(el.offsetTop);
+    update();
+    // Header / filter rows can change height (date picker, project pill, etc.)
+    // Watch the body and the table itself so the offset stays correct.
+    const ro = new ResizeObserver(update);
+    ro.observe(document.body);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const virtualizer = useWindowVirtualizer({
     count: filtered.length,
@@ -669,8 +660,8 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
               return (
                 <tr
                   key={s.session_id}
-                  className={`hover:bg-[rgba(74,144,217,0.05)] ${onSelectSession && s.source === "claude" ? "cursor-pointer hover:bg-[rgba(74,144,217,0.1)]!" : ""}`}
-                  onClick={() => onSelectSession && s.source === "claude" && onSelectSession(s.session_id)}
+                  className={`hover:bg-[rgba(74,144,217,0.05)] ${onSelectSession ? "cursor-pointer hover:bg-[rgba(74,144,217,0.1)]!" : ""}`}
+                  onClick={() => onSelectSession?.(s.session_id)}
                   style={{
                     position: "absolute",
                     top: 0,
@@ -694,6 +685,9 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
                   <td className={tdBase}>{s.subagent_count > 0 ? `${s.subagent_count} (${formatCost(s.subagent_cost_usd)})` : "\u2014"}</td>
                   <td className={tdBase}>
                     <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold uppercase ${s.source === "claude" ? "bg-[rgba(74,144,217,0.15)] text-[var(--color-primary)]" : "bg-[rgba(39,174,96,0.15)] text-[var(--color-cache-read)]"}`}>{s.source}</span>
+                    {displayModel(s.model) && (
+                      <span className="ml-1.5 text-[11px] text-[var(--color-muted)]" title={s.model ?? undefined}>{displayModel(s.model)}</span>
+                    )}
                   </td>
                   <td className={tdBase}>{formatDate(s.first_timestamp)}</td>
                 </tr>
@@ -1767,6 +1761,9 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
         <div className="flex gap-3 items-center text-[13px] text-[var(--color-muted)] flex-wrap">
           <span>{summary.git_branch ?? "no branch"}</span>
           <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold uppercase ${summary.source === "claude" ? "bg-[rgba(74,144,217,0.15)] text-[var(--color-primary)]" : "bg-[rgba(39,174,96,0.15)] text-[var(--color-cache-read)]"}`}>{summary.source}</span>
+          {displayModel(summary.model) && (
+            <span className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-[rgba(255,255,255,0.04)] border border-[var(--color-border)]" title={summary.model ?? undefined}>{displayModel(summary.model)}</span>
+          )}
           <span>{formatDate(summary.first_timestamp)}</span>
           <span>{formatDuration(getSessionDurationMs(summary))}</span>
         </div>
@@ -1795,7 +1792,6 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>("30d");
-  const [model, setModel] = useState<string>("all");
   const [customDateFrom, setCustomDateFrom] = useState("");
   const [customDateTo, setCustomDateTo] = useState("");
   const [sessionDetail, setSessionDetail] = useState<SessionDetail | null>(null);
@@ -1855,24 +1851,20 @@ function App() {
   }, [refreshData]);
 
   const sessions = useMemo(() => filterByDateRange(allSessions, dateRange, customDateFrom, customDateTo), [allSessions, dateRange, customDateFrom, customDateTo]);
-  const pricedSessions = useMemo(() => {
-    const p = getModelPricing(model);
-    return sessions.map((s) => ({ ...s, estimated_cost_usd: calcSessionCost(s, p) }));
-  }, [sessions, model]);
   const sourceCounts = useMemo(() => ({
-    all: pricedSessions.length,
-    claude: pricedSessions.filter((s) => s.source === "claude").length,
-    codex: pricedSessions.filter((s) => s.source === "codex").length,
-  }), [pricedSessions]);
+    all: sessions.length,
+    claude: sessions.filter((s) => s.source === "claude").length,
+    codex: sessions.filter((s) => s.source === "codex").length,
+  }), [sessions]);
 
   const filteredSessions = useMemo(() => {
-    let result = pricedSessions;
+    let result = sessions;
     if (sourceFilter !== "all") result = result.filter((s) => s.source === sourceFilter);
     if (projectFilter) result = result.filter((s) => s.project === projectFilter);
     return result;
-  }, [pricedSessions, sourceFilter, projectFilter]);
+  }, [sessions, sourceFilter, projectFilter]);
 
-  const overview = useMemo(() => computeOverview(filteredSessions, model), [filteredSessions, model]);
+  const overview = useMemo(() => computeOverview(filteredSessions), [filteredSessions]);
 
   if (loading) return <LoadingScreen message="Loading session data..." />;
   if (error) return <main className="flex justify-center items-center min-h-screen"><motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-base p-10 text-[#e74c3c]">Error: {error}</motion.div></main>;
@@ -1939,7 +1931,6 @@ function App() {
           </div>
           <div className="flex items-center gap-3 pb-3 flex-wrap">
             <SourceFilter value={sourceFilter} onChange={setSourceFilter} counts={sourceCounts} />
-            <ModelSelector value={model} onChange={setModel} sourceFilter={sourceFilter} />
             <DateRangeSelector value={dateRange} onChange={setDateRange}
               customFrom={customDateFrom} customTo={customDateTo}
               onCustomFromChange={setCustomDateFrom} onCustomToChange={setCustomDateTo} />
@@ -1973,13 +1964,13 @@ function App() {
               <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4 mb-6">
                 {[
                   { label: "Total Cost", value: formatCost(overview.total_cost_usd), sub: overview.total_sessions > 0 ? `${formatCost(overview.total_cost_usd / overview.total_sessions)} avg/session` : undefined },
-                  { label: "Sessions", value: overview.total_sessions.toString(), sub: (() => { const totalMs = pricedSessions.reduce((s, x) => s + getSessionDurationMs(x), 0); return totalMs > 0 ? `${formatDuration(totalMs)} total` : undefined; })() },
+                  { label: "Sessions", value: overview.total_sessions.toString(), sub: (() => { const totalMs = filteredSessions.reduce((s, x) => s + getSessionDurationMs(x), 0); return totalMs > 0 ? `${formatDuration(totalMs)} total` : undefined; })() },
                   { label: "Cache Hit Rate", value: formatPercent(overview.avg_cache_hit_rate), sub: "higher is better" },
                   { label: "System Overhead", value: formatTokens(overview.estimated_system_overhead_tokens), sub: "per session (est.)" },
-                  { label: "Input Tokens", value: formatTokens(overview.total_input_tokens), sub: `$${getModelPricing(model).input}/MTok` },
-                  { label: "Output Tokens", value: formatTokens(overview.total_output_tokens), sub: `$${getModelPricing(model).output}/MTok` },
-                  { label: "Cache Read Tokens", value: formatTokens(overview.total_cache_read_tokens), sub: `$${getModelPricing(model).cacheRead}/MTok` },
-                  { label: "Cache Write Tokens", value: formatTokens(overview.total_cache_write_tokens), sub: `$${getModelPricing(model).cacheWrite}/MTok` },
+                  { label: "Input Tokens", value: formatTokens(overview.total_input_tokens), sub: formatCost(overview.cost_breakdown.input_cost) },
+                  { label: "Output Tokens", value: formatTokens(overview.total_output_tokens), sub: formatCost(overview.cost_breakdown.output_cost) },
+                  { label: "Cache Read Tokens", value: formatTokens(overview.total_cache_read_tokens), sub: formatCost(overview.cost_breakdown.cache_read_cost) },
+                  { label: "Cache Write Tokens", value: formatTokens(overview.total_cache_write_tokens), sub: formatCost(overview.cost_breakdown.cache_write_cost) },
                 ].map((card, i) => (
                   <motion.div
                     key={card.label}
@@ -1995,16 +1986,16 @@ function App() {
                 <CostBar breakdown={overview.cost_breakdown} />
               </motion.div>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }}>
-                <ContextComposition overview={overview} cacheWriteRate={getModelPricing(model).cacheWrite} />
+                <ContextComposition overview={overview} />
               </motion.div>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
-                <DailyCostChart dailyCosts={overview.daily_costs} pricing={getModelPricing(model)} />
+                <DailyCostChart dailyCosts={overview.daily_costs} />
               </motion.div>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}>
-                <Recommendations sessions={pricedSessions} overview={overview} />
+                <Recommendations sessions={filteredSessions} overview={overview} />
               </motion.div>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
-                <SavingsPotential overview={overview} sessions={pricedSessions} pricing={getModelPricing(model)} />
+                <SavingsPotential overview={overview} sessions={filteredSessions} />
               </motion.div>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.45 }} className="mb-6">
                 <h3 className="text-sm font-semibold mb-3">Top Sessions by Cost</h3>
