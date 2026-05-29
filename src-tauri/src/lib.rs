@@ -2,6 +2,7 @@ pub mod cache_savings;
 pub mod cli;
 pub mod models;
 pub mod parser;
+pub mod path_install;
 
 use models::{OverviewMetrics, SessionDetail, SessionSummary};
 
@@ -35,6 +36,16 @@ async fn get_session_detail(session_id: String) -> Option<SessionDetail> {
     parser::get_session_detail_any(&session_id, pricing)
 }
 
+#[tauri::command]
+fn cli_path_status() -> path_install::CliStatus {
+    path_install::status()
+}
+
+#[tauri::command]
+fn install_cli_path() -> path_install::CliInstallResult {
+    path_install::install()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -43,6 +54,8 @@ pub fn run() {
             get_sessions,
             refresh_sessions,
             get_session_detail,
+            cli_path_status,
+            install_cli_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
