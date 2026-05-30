@@ -30,3 +30,8 @@ src-tauri/swift-plugin/.build/
 .claude
 *.pkg
 .port-offset
+
+# Tauri updater signing key (NEVER commit) + generated update feed
+*.key
+*.key.pub
+latest.json

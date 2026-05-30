@@ -1,0 +1,41 @@
+name: Release
+
+# Manual dispatch only — never auto-triggers. Runs on the self-hosted macOS
+# runner (free), which reads signing secrets from the login Keychain.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Which channel(s) to build and upload"
+        type: choice
+        options:
+          - both
+          - appstore
+          - dev
+        default: both
+
+# Serialize releases so two runs never fight over the build/keychain.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # gh release create/upload (dev channel)
+
+jobs:
+  release:
+    runs-on: [self-hosted, macOS]
+    env:
+      GH_TOKEN: ${{ github.token }} # used by gh in scripts/release-dev.sh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install frontend dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Build & upload
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: scripts/release-all.sh "$CHANNEL"
