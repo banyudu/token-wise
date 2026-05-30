@@ -17,8 +17,16 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# `updater` ships the self-update path (Developer ID / direct-distribution
+# builds). The App Store build is compiled with `--no-default-features` so the
+# updater plugin is entirely absent from the MAS binary.
+default = ["updater"]
+updater = ["dep:tauri-plugin-updater"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-updater = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 glob = "0.3"

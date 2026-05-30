@@ -3,6 +3,8 @@ pub mod cli;
 pub mod models;
 pub mod parser;
 pub mod path_install;
+#[cfg(feature = "updater")]
+pub mod updater;
 
 use models::{OverviewMetrics, SessionDetail, SessionSummary};
 
@@ -46,9 +48,29 @@ fn install_cli_path() -> path_install::CliInstallResult {
     path_install::install()
 }
 
+/// Relaunch the app to apply a downloaded update. No-op effect in the App Store
+/// build (the `update-ready` event that triggers it is never emitted there).
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(feature = "updater")]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    builder
+        .setup(|_app| {
+            #[cfg(feature = "updater")]
+            updater::spawn_check(_app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_overview,
             get_sessions,
@@ -56,6 +78,7 @@ pub fn run() {
             get_session_detail,
             cli_path_status,
             install_cli_path,
+            restart_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
