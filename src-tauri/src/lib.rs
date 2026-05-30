@@ -2,6 +2,7 @@ pub mod cache_savings;
 pub mod cli;
 pub mod models;
 pub mod parser;
+pub mod path_install;
 #[cfg(feature = "updater")]
 pub mod updater;
 
@@ -37,6 +38,16 @@ async fn get_session_detail(session_id: String) -> Option<SessionDetail> {
     parser::get_session_detail_any(&session_id, pricing)
 }
 
+#[tauri::command]
+fn cli_path_status() -> path_install::CliStatus {
+    path_install::status()
+}
+
+#[tauri::command]
+fn install_cli_path() -> path_install::CliInstallResult {
+    path_install::install()
+}
+
 /// Relaunch the app to apply a downloaded update. No-op effect in the App Store
 /// build (the `update-ready` event that triggers it is never emitted there).
 #[tauri::command]
@@ -65,6 +76,8 @@ pub fn run() {
             get_sessions,
             refresh_sessions,
             get_session_detail,
+            cli_path_status,
+            install_cli_path,
             restart_app,
         ])
         .run(tauri::generate_context!())

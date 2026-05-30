@@ -148,6 +148,22 @@ export interface CacheSavingsReport {
   total_potential_savings_usd: number;
 }
 
+export interface CliStatus {
+  on_path: boolean;
+  link_exists: boolean;
+  link_path: string;
+  bin_dir_on_path: boolean;
+  sandboxed: boolean;
+  exe_path: string;
+}
+
+export interface CliInstallResult {
+  ok: boolean;
+  outcome: "installed" | "already" | "sandboxed" | "error";
+  message: string;
+  status: CliStatus;
+}
+
 export interface SessionDetail {
   summary: SessionSummary;
   turns: TurnMetrics[];

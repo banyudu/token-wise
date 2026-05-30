@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { invoke } from "@tauri-apps/api/core";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
-import type { CostBreakdown, OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem, CacheSavingsReport } from "./types";
+import type { CostBreakdown, OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem, CacheSavingsReport, CliStatus, CliInstallResult } from "./types";
 import { codeToHtml } from "shiki";
 import ReactMarkdown from "react-markdown";
 import { LoadingScreen } from "./LoadingScreen";
@@ -1786,9 +1786,125 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
   );
 }
 
+function CopyableCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback(() => {
+    navigator.clipboard.writeText(command).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }, [command]);
+  return (
+    <div className="flex items-stretch gap-2 mt-1.5">
+      <code className="flex-1 min-w-0 text-[12px] font-mono bg-[rgba(0,0,0,0.25)] text-[var(--color-text)] rounded-md px-3 py-2 overflow-x-auto whitespace-nowrap">{command}</code>
+      <button
+        className="shrink-0 px-2.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[12px] text-[var(--color-muted)] cursor-pointer transition-colors hover:text-[var(--color-primary)] hover:border-[var(--color-primary)]"
+        onClick={copy}
+      >{copied ? "Copied" : "Copy"}</button>
+    </div>
+  );
+}
+
+function SettingsDialog({ onClose }: { onClose: () => void }) {
+  const [status, setStatus] = useState<CliStatus | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<CliInstallResult["outcome"] | null>(null);
+  const [installing, setInstalling] = useState(false);
+
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, []);
+
+  useEffect(() => {
+    invoke<CliStatus>("cli_path_status").then(setStatus).catch(() => {});
+  }, []);
+
+  const install = useCallback(() => {
+    setInstalling(true);
+    invoke<CliInstallResult>("install_cli_path")
+      .then((res) => { setStatus(res.status); setMessage(res.message); setOutcome(res.outcome); })
+      .catch((e) => { setMessage(String(e)); setOutcome("error"); })
+      .finally(() => setInstalling(false));
+  }, []);
+
+  const installed = status?.on_path || status?.link_exists;
+  // Auto-install can't write outside the App Store sandbox container, so guide
+  // the user through a manual setup whenever it's blocked or hasn't happened.
+  const showManual = !!status && (status.sandboxed || outcome === "sandboxed" || (!installed && outcome === "error"));
+  const exe = status?.exe_path || "/Applications/token-wise.app/Contents/MacOS/token-wise";
+  const linkPath = status?.link_path || "~/.local/bin/token-wise";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-xl max-w-[560px] max-h-[85vh] w-[92vw] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
+          <span className="text-sm font-semibold">Settings</span>
+          <button
+            className="bg-none border-none text-[var(--color-muted)] cursor-pointer text-lg leading-none hover:text-[var(--color-text)] ml-3 shrink-0"
+            onClick={onClose}
+          >&times;</button>
+        </div>
+        <div className="overflow-auto flex-1 p-4">
+          <h3 className="text-sm font-semibold">Command-line tool</h3>
+          <p className="text-[13px] text-[var(--color-muted)] mt-1 leading-relaxed">
+            The same binary doubles as a CLI. Once it's on your PATH you can run
+            {" "}<code className="text-[12px] px-1 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)]">token-wise total</code>,{" "}
+            <code className="text-[12px] px-1 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)]">today</code>, or{" "}
+            <code className="text-[12px] px-1 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)]">sessions</code> from any terminal.
+          </p>
+
+          <div className="flex items-center gap-3 mt-4">
+            <span className={`text-[13px] font-medium ${installed ? "text-[var(--color-output)]" : "text-[var(--color-muted)]"}`}>
+              {status == null ? "Checking…" : installed ? "✓ Installed" : "Not on your PATH yet"}
+            </span>
+            {status != null && !installed && (
+              <button
+                className="px-3 py-1.5 rounded-lg border border-[var(--color-primary)] bg-[var(--color-primary)] text-white text-[13px] font-medium cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={install}
+                disabled={installing}
+              >{installing ? "Installing…" : "Install to PATH"}</button>
+            )}
+          </div>
+
+          {message && (
+            <p className={`text-[12px] mt-2 leading-relaxed ${outcome === "error" ? "text-[#e74c3c]" : "text-[var(--color-muted)]"}`}>{message}</p>
+          )}
+
+          {installed && status && !status.bin_dir_on_path && !status.on_path && (
+            <div className="mt-3">
+              <p className="text-[12px] text-[var(--color-muted)] leading-relaxed">Add <code className="text-[12px] px-1 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)]">~/.local/bin</code> to your PATH, then open a new terminal:</p>
+              <CopyableCommand command={'export PATH="$HOME/.local/bin:$PATH"'} />
+            </div>
+          )}
+
+          {showManual && (
+            <div className="mt-4 pt-4 border-t border-[var(--color-border)]">
+              <p className="text-[13px] text-[var(--color-muted)] leading-relaxed">
+                {status?.sandboxed
+                  ? "This build is sandboxed (installed from the App Store), so it can't modify your PATH for you. Set it up manually:"
+                  : "Automatic setup didn't work. Set it up manually:"}
+              </p>
+              <p className="text-[12px] font-medium mt-3 mb-0">Option A — shell alias</p>
+              <p className="text-[12px] text-[var(--color-muted)]">Add to your <code className="text-[12px] px-1 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)]">~/.zshrc</code> (or <code className="text-[12px] px-1 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)]">~/.bashrc</code>):</p>
+              <CopyableCommand command={`alias token-wise='${exe}'`} />
+              <p className="text-[12px] font-medium mt-4 mb-0">Option B — symlink onto PATH</p>
+              <CopyableCommand command={`mkdir -p "$HOME/.local/bin" && ln -sf '${exe}' '${linkPath}'`} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [allSessions, setAllSessions] = useState<SessionSummary[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
+  const [showSettings, setShowSettings] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>("30d");
@@ -1888,6 +2004,9 @@ function App() {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>
+      <AnimatePresence>
+        {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      </AnimatePresence>
       <header className="glass-header mb-6">
         <div className="mx-auto px-5">
           <div className="flex items-center gap-6 py-3">
@@ -1912,6 +2031,18 @@ function App() {
                 </motion.button>
               ))}
             </nav>
+            <motion.button
+              className="flex items-center justify-center w-8 h-8 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-muted)] cursor-pointer transition-colors duration-150 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)]"
+              onClick={() => setShowSettings(true)}
+              title="Settings"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </motion.button>
             <motion.button
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[13px] font-medium text-[var(--color-muted)] cursor-pointer transition-colors duration-150 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={refreshData}
