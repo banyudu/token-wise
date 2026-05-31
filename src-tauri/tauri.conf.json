@@ -43,7 +43,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUzRDlDQzk3ODlGNzZFOTUKUldTVmJ2ZUpsOHpaNCt5Zzc2NDFQSkQyR0MzRTNlOEd2WTF4RXNOTWRtczMvejk5UTB1RjdjREUK",
       "endpoints": [
-        "https://github.com/banyudu/token-wise/releases/latest/download/latest.json"
+        "https://assets.banyudu.com/token-wise/latest.json"
       ]
     }
   }
