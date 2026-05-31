@@ -4,8 +4,13 @@ The app ships through **two independent channels** from one codebase:
 
 | Channel | Signing | Sandbox | Updates | Output |
 | --- | --- | --- | --- | --- |
-| **Dev** (direct) | `Developer ID Application` | no (hardened runtime) | Tauri auto-updater | DMG + `latest.json` on GitHub Releases |
+| **Dev** (direct) | `Developer ID Application` | no (hardened runtime) | Tauri auto-updater | DMG + `latest.json` on S3 (assets.banyudu.com) |
 | **App Store** | `Apple Distribution` | yes + provisioning profile | App Store | `.pkg` via `altool` |
+
+> The repo is **private**, so the auto-updater (which runs on end-user machines
+> with no GitHub credentials) can't read GitHub release assets — they 404
+> anonymously. The dev channel therefore publishes its public binaries + feed to
+> object storage at `https://assets.banyudu.com/token-wise/` instead.
 
 Bump the version once and you can ship the **same** version to both: dev-build
 users get it immediately (auto-update); App Store users get it after review.
@@ -26,9 +31,14 @@ pnpm release:dev        # dev channel only
 
 `scripts/release-all.sh` loads secrets from the Keychain, then for App Store:
 builds (sandboxed, no updater, **not** notarized) → `.pkg` → `altool` upload;
-for dev: builds + notarizes the DMG + signs the updater artifact → creates the
-`v<version>` GitHub Release with the DMG, `token-wise.app.tar.gz`, and
-`latest.json`.
+for dev: builds + notarizes the DMG + signs the updater artifact → copies the
+DMG and `token-wise.app.tar.gz` to the S3 mount under
+`token-wise/v<version>/` and publishes `token-wise/latest.json` (the updater
+feed) once the tarball is publicly reachable.
+
+> The S3 mount defaults to `~/Library/CloudStorage/S3-S3/assets` and the public
+> base URL to `https://assets.banyudu.com/token-wise`; override with
+> `TOKENWISE_S3_ASSETS_DIR` / `TOKENWISE_UPDATER_BASE_URL` if either changes.
 
 Bump the version first so both channels match:
 
