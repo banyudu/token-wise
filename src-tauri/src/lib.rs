@@ -1,5 +1,6 @@
 pub mod cache_savings;
 pub mod cli;
+pub mod grants;
 pub mod models;
 pub mod parser;
 pub mod path_install;
@@ -79,6 +80,8 @@ pub fn run() {
             cli_path_status,
             install_cli_path,
             restart_app,
+            grants::grants_status,
+            grants::grant_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

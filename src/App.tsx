@@ -13,6 +13,7 @@ type Tab = "overview" | "sessions" | "projects";
 type SortField = "cost" | "date" | "input" | "output" | "cache_write" | "cache_read" | "cache_hit" | "messages" | "duration";
 type SortDir = "asc" | "desc";
 type DateRange = "7d" | "30d" | "90d" | "all" | "custom";
+type GrantStatus = { sandboxed: boolean; claude: boolean; codex: boolean };
 
 const EMPTY_BREAKDOWN: CostBreakdown = {
   input_cost: 0, output_cost: 0, cache_write_cost: 0, cache_read_cost: 0, total_cost: 0,
@@ -1810,6 +1811,8 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<CliInstallResult["outcome"] | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [grantStatus, setGrantStatus] = useState<GrantStatus | null>(null);
+  const [granting, setGranting] = useState<"claude" | "codex" | null>(null);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -1820,12 +1823,24 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
     invoke<CliStatus>("cli_path_status").then(setStatus).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    invoke<GrantStatus>("grants_status").then(setGrantStatus).catch(() => {});
+  }, []);
+
   const install = useCallback(() => {
     setInstalling(true);
     invoke<CliInstallResult>("install_cli_path")
       .then((res) => { setStatus(res.status); setMessage(res.message); setOutcome(res.outcome); })
       .catch((e) => { setMessage(String(e)); setOutcome("error"); })
       .finally(() => setInstalling(false));
+  }, []);
+
+  const regrant = useCallback((kind: "claude" | "codex") => {
+    setGranting(kind);
+    invoke<{ path: string }>("grant_folder", { kind })
+      .then(() => invoke<GrantStatus>("grants_status").then(setGrantStatus))
+      .catch(() => {})
+      .finally(() => setGranting(null));
   }, []);
 
   const installed = status?.on_path || status?.link_exists;
@@ -1849,6 +1864,26 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
           >&times;</button>
         </div>
         <div className="overflow-auto flex-1 p-4">
+          {grantStatus?.sandboxed && (
+            <div className="mb-5 pb-5 border-b border-[var(--color-border)]">
+              <h3 className="text-sm font-semibold">Data folder access</h3>
+              <p className="text-[13px] text-[var(--color-muted)] mt-1 leading-relaxed">
+                Token Wise reads <code className="text-[12px] px-1 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)]">.claude</code> and <code className="text-[12px] px-1 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)]">.codex</code> from your home folder. Re-grant if the app stops seeing your data after a macOS update or restore.
+              </p>
+              <div className="flex gap-2 mt-3">
+                <button
+                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[13px] font-medium cursor-pointer transition-colors hover:border-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => regrant("claude")}
+                  disabled={granting !== null}
+                >{granting === "claude" ? "Waiting…" : `Re-grant .claude${grantStatus.claude ? " ✓" : ""}`}</button>
+                <button
+                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[13px] font-medium cursor-pointer transition-colors hover:border-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => regrant("codex")}
+                  disabled={granting !== null}
+                >{granting === "codex" ? "Waiting…" : `Re-grant .codex${grantStatus.codex ? " ✓" : ""}`}</button>
+              </div>
+            </div>
+          )}
           <h3 className="text-sm font-semibold">Command-line tool</h3>
           <p className="text-[13px] text-[var(--color-muted)] mt-1 leading-relaxed">
             The same binary doubles as a CLI. Once it's on your PATH you can run
@@ -1901,10 +1936,65 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+function OnboardingScreen({ status, onGranted }: { status: GrantStatus; onGranted: () => void }) {
+  const [busy, setBusy] = useState<"claude" | "codex" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const grant = useCallback((kind: "claude" | "codex") => {
+    setBusy(kind); setError(null);
+    invoke<{ path: string }>("grant_folder", { kind })
+      .then(() => onGranted())
+      .catch((e) => { const msg = String(e); if (msg !== "cancelled") setError(msg); })
+      .finally(() => setBusy(null));
+  }, [onGranted]);
+
+  const folders: { kind: "claude" | "codex"; name: string; desc: string; granted: boolean }[] = [
+    { kind: "claude", name: ".claude", desc: "Claude Code session transcripts & pricing", granted: status.claude },
+    { kind: "codex", name: ".codex", desc: "Codex usage logs", granted: status.codex },
+  ];
+
+  return (
+    <main className="min-h-screen flex items-center justify-center px-5">
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
+        className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-xl max-w-[560px] w-full p-8">
+        <img src="/icon-horizontal.png" alt="Token Wise" className="h-12 mb-5" />
+        <h1 className="text-xl font-bold">Grant folder access</h1>
+        <p className="text-[13px] text-[var(--color-muted)] mt-2 leading-relaxed">
+          Token Wise reads your AI usage data from your home folder. To respect macOS privacy, grant access to each folder once — you won&apos;t be asked again.
+        </p>
+        <div className="flex flex-col gap-3 mt-5">
+          {folders.map((f) => (
+            <div key={f.kind} className="flex items-center gap-3 p-3 rounded-lg border border-[var(--color-border)]">
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] font-semibold font-mono">{f.name}</div>
+                <div className="text-[12px] text-[var(--color-muted)] truncate">{f.desc}</div>
+              </div>
+              {f.granted ? (
+                <span className="text-[13px] font-medium text-[var(--color-output)] shrink-0">✓ Granted</span>
+              ) : (
+                <button
+                  className="px-3 py-1.5 rounded-lg border border-[var(--color-primary)] bg-[var(--color-primary)] text-white text-[13px] font-medium cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  disabled={busy !== null}
+                  onClick={() => grant(f.kind)}
+                >{busy === f.kind ? "Waiting…" : "Grant access"}</button>
+              )}
+            </div>
+          ))}
+        </div>
+        {error && <p className="text-[12px] text-[#e74c3c] mt-3 leading-relaxed">{error}</p>}
+        <p className="text-[11px] text-[var(--color-muted)] mt-4 leading-relaxed">
+          In the picker, the expected folder is pre-selected — just click <strong>Grant Access</strong>. If a folder isn&apos;t visible, press <kbd className="px-1 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)] font-mono">⌘⇧.</kbd> to reveal hidden folders.
+        </p>
+      </motion.div>
+    </main>
+  );
+}
+
 function App() {
   const [allSessions, setAllSessions] = useState<SessionSummary[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
   const [showSettings, setShowSettings] = useState(false);
+  const [grants, setGrants] = useState<GrantStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>("30d");
@@ -1953,7 +2043,20 @@ function App() {
     finally { setDetailLoading(false); }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  // Non-sandboxed builds report both folders granted and skip onboarding.
+  const refreshGrants = useCallback(() => {
+    invoke<GrantStatus>("grants_status")
+      .then(setGrants)
+      .catch(() => setGrants({ sandboxed: false, claude: true, codex: true }));
+  }, []);
+
+  useEffect(() => { refreshGrants(); }, [refreshGrants]);
+
+  // Only load data once folder access is available (sandboxed builds need the
+  // grant first; non-sandboxed builds are immediately ready).
+  useEffect(() => {
+    if (grants && grants.claude && grants.codex) loadData();
+  }, [grants, loadData]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1982,6 +2085,10 @@ function App() {
 
   const overview = useMemo(() => computeOverview(filteredSessions), [filteredSessions]);
 
+  if (grants == null) return <LoadingScreen message="Starting Token Wise…" />;
+  if (grants.sandboxed && !(grants.claude && grants.codex)) {
+    return <OnboardingScreen status={grants} onGranted={refreshGrants} />;
+  }
   if (loading) return <LoadingScreen message="Loading session data..." />;
   if (error) return <main className="flex justify-center items-center min-h-screen"><motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-base p-10 text-[#e74c3c]">Error: {error}</motion.div></main>;
 

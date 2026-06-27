@@ -8,11 +8,10 @@
     <true/>
     <key>com.apple.security.files.user-selected.read-only</key>
     <true/>
-    <key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
-    <array>
-        <string>/.claude/</string>
-        <string>/.codex/</string>
-    </array>
+    <!-- `~/.claude` and `~/.codex` are read via a user-granted folder picker and a
+         persisted security-scoped bookmark (see src/grants.*), NOT via a temporary
+         entitlement. Apple rejects the temporary-exception entitlement (guideline
+         2.4.5(i)), so it is intentionally omitted. -->
     <key>com.apple.application-identifier</key>
     <string>RYLS8UDY5D.com.banyudu.token-wise</string>
     <key>com.apple.developer.team-identifier</key>

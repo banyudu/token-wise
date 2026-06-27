@@ -299,9 +299,11 @@ impl PricingTable {
         let mut explicit: std::collections::HashMap<String, PricingInfo> =
             std::collections::HashMap::new();
 
-        // Read Claude price overrides if present.
-        if let Some(home) = dirs::home_dir() {
-            let path = home.join(".claude").join("readout-pricing.json");
+        // Read Claude price overrides if present. Resolves via the sandbox
+        // grant when applicable (`~/.claude` is otherwise unreadable in the App
+        // Store build); falls back to built-in pricing when not granted.
+        if let Some(claude) = crate::grants::claude_root() {
+            let path = claude.join("readout-pricing.json");
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
                     let roots = [json.get("models").cloned(), Some(json.clone())];

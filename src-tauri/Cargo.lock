@@ -4100,6 +4100,7 @@ dependencies = [
 name = "token-wise"
 version = "0.1.8"
 dependencies = [
+ "cc",
  "chrono",
  "clap",
  "dirs",

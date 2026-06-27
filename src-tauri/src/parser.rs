@@ -24,11 +24,13 @@ pub fn get_cached_pricing() -> &'static PricingTable {
 }
 
 fn get_claude_projects_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude").join("projects"))
+    // Resolves `~/.claude` directly (non-sandboxed) or via the user-granted
+    // security-scoped bookmark (sandboxed App Store build). See `crate::grants`.
+    crate::grants::claude_root().map(|r| r.join("projects"))
 }
 
 fn get_codex_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".codex"))
+    crate::grants::codex_root()
 }
 
 fn decode_project_name(encoded: &str) -> String {
