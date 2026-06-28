@@ -1,3 +1,39 @@
+import { homeDir as tauriHomeDir } from "@tauri-apps/api/path";
+
+let _homeDir: string | null = null;
+
+export async function initHomeDir(): Promise<void> {
+  _homeDir = (await tauriHomeDir()) ?? null;
+}
+
+export function formatPath(path: string, maxSegments = 3, basePath?: string): string {
+  let result = path;
+  if (_homeDir && path.startsWith(_homeDir)) {
+    result = "~" + path.slice(_homeDir.length);
+  }
+
+  if (basePath) {
+    if (path.startsWith(basePath)) {
+      const rel = path.slice(basePath.length).replace(/^\//, "");
+      if (rel) return rel;
+    }
+    let base = basePath;
+    if (_homeDir && base.startsWith(_homeDir)) {
+      base = "~" + base.slice(_homeDir.length);
+    }
+    if (result.startsWith(base + "/")) {
+      const rel = result.slice(base.length + 1);
+      if (rel) return rel;
+    }
+  }
+
+  const parts = result.split("/");
+  if (parts.length > maxSegments) {
+    return ".../" + parts.slice(-(maxSegments - 1)).join("/");
+  }
+  return result;
+}
+
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;

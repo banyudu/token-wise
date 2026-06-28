@@ -6,6 +6,7 @@ import type { CostBreakdown, OverviewMetrics, SessionSummary, ProjectSummary, Se
 import { codeToHtml } from "shiki";
 import ReactMarkdown from "react-markdown";
 import { LoadingScreen } from "./LoadingScreen";
+import { formatPath, initHomeDir } from "./utils/format";
 
 import "./App.css";
 
@@ -55,11 +56,6 @@ function formatDate(ts: string | null): string {
   if (!ts) return "\u2014";
   const d = new Date(ts);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function shortenProject(path: string): string {
-  const parts = path.split("/");
-  return parts.length > 2 ? parts.slice(-2).join("/") : path;
 }
 
 function getSessionDurationMs(s: SessionSummary): number {
@@ -693,7 +689,7 @@ function SessionsTable({ sessions, sortField, sortDir, onSort, filter, onFilterC
                     transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                   }}
                 >
-                  <td className={tdBase} style={{ width: 240, minWidth: 240 }} title={s.project}>{shortenProject(s.project)}</td>
+                  <td className={tdBase} style={{ width: 240, minWidth: 240 }} title={s.project}>{formatPath(s.project)}</td>
                   <td className={`${tdBase} max-w-[300px]`} title={s.title ?? ""}>{s.title ?? "\u2014"}</td>
                   <td className={`${tdBase} max-w-[200px]`}>{s.git_branch ?? "\u2014"}</td>
                   <td className={tdBase}>{s.message_count}</td>
@@ -773,7 +769,7 @@ function ProjectsTable({ projects, onSelectProject }: { projects: ProjectSummary
         <tbody>
           {sorted.map((p) => (
             <tr key={p.project} className={`hover:bg-[rgba(74,144,217,0.05)] ${onSelectProject ? "cursor-pointer hover:bg-[rgba(74,144,217,0.1)]!" : ""}`} onClick={() => onSelectProject?.(p.project)}>
-              <td className={tdBase} style={{ minWidth: 360, maxWidth: 520 }} title={p.project}>{shortenProject(p.project)}</td>
+              <td className={tdBase} style={{ minWidth: 360, maxWidth: 520 }} title={p.project}>{formatPath(p.project)}</td>
               <td className={tdBase}>{p.session_count}</td>
               <td className={`${tdBase} font-semibold text-[var(--color-output)]`}>{formatCost(p.total_cost_usd)}</td>
               <td className={tdBase}>{formatPercent(p.avg_cache_hit_rate)}</td>
@@ -1285,7 +1281,7 @@ function JsonlView({ content }: { content: string }) {
   );
 }
 
-function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => void }) {
+function PreviewDialog({ item, project, onClose }: { item: ContentItem; project: string; onClose: () => void }) {
   const lang = useMemo(() => detectLang(item.source, item.category), [item.source, item.category]);
   const rawCode = useMemo(() => stripAnsiCodes(stripLineNumbers(item.full_content)), [item.full_content]);
   const thinking = useMemo(() => extractThinking(rawCode), [rawCode]);
@@ -1312,7 +1308,7 @@ function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => vo
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-sm font-semibold shrink-0">Content Preview</span>
-            {item.source && <span className="text-[12px] text-[var(--color-muted)] truncate" title={item.source}>{item.source}</span>}
+            {item.source && <span className="text-[12px] text-[var(--color-muted)] truncate" title={item.source}>{formatPath(item.source, 3, project)}</span>}
             <span className="text-[11px] px-1.5 py-0.5 rounded bg-[rgba(74,144,217,0.1)] text-[var(--color-primary)] shrink-0">{fileEdit ? "diff" : thinking ? "thinking" : isMarkdown ? "markdown" : effectiveLang}</span>
           </div>
           <button
@@ -1347,7 +1343,7 @@ function PreviewDialog({ item, onClose }: { item: ContentItem; onClose: () => vo
   );
 }
 
-function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
+function ContentAnalysisView({ analysis, project }: { analysis: ContentAnalysis; project: string }) {
   const [showTopItems, setShowTopItems] = useState(false);
   const [previewItem, setPreviewItem] = useState<ContentItem | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
@@ -1471,7 +1467,7 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
                         {item.category}
                       </td>
                       <td className={tdBase}>{item.tool_name ?? "\u2014"}</td>
-                      <td className={`${tdBase} max-w-[260px] truncate`} title={item.source ?? undefined}>{item.source ?? "\u2014"}</td>
+                      <td className={`${tdBase} max-w-[260px] truncate`} title={item.source ?? undefined}>{item.source ? formatPath(item.source, 3, project) : "\u2014"}</td>
                       <td className={tdBase}>{formatTokens(item.estimated_tokens)}</td>
                       <td className={tdBase}>
                         {item.full_content ? (
@@ -1486,7 +1482,7 @@ function ContentAnalysisView({ analysis }: { analysis: ContentAnalysis }) {
                 </tbody>
               </table>
             )}
-            {previewItem && <PreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />}
+            {previewItem && <PreviewDialog item={previewItem} project={project} onClose={() => setPreviewItem(null)} />}
           </div>
           );
         })()}
@@ -1681,7 +1677,7 @@ function CacheSavingsView({ report }: { report: CacheSavingsReport }) {
   );
 }
 
-function TurnByTurnTable({ turns, maxTurnCost, contentItems }: { turns: TurnMetrics[]; maxTurnCost: number; contentItems: ContentItem[] }) {
+function TurnByTurnTable({ turns, maxTurnCost, contentItems, project }: { turns: TurnMetrics[]; maxTurnCost: number; contentItems: ContentItem[]; project: string }) {
   const [expandedTurn, setExpandedTurn] = useState<number | null>(null);
 
   const itemsByTurn = useMemo(() => {
@@ -1748,7 +1744,7 @@ function TurnByTurnTable({ turns, maxTurnCost, contentItems }: { turns: TurnMetr
                                       {item.category}
                                     </td>
                                     <td className="py-1 px-2 whitespace-nowrap">{item.tool_name ?? "\u2014"}</td>
-                                    <td className="py-1 px-2 max-w-[400px] truncate" title={item.source ?? item.preview}>{item.source ?? item.preview}</td>
+                                    <td className="py-1 px-2 max-w-[400px] truncate" title={item.source ?? item.preview}>{item.source ? formatPath(item.source, 3, project) : (item.preview ?? "\u2014")}</td>
                                     <td className="py-1 px-2 whitespace-nowrap">{formatTokens(item.estimated_tokens)}</td>
                                   </tr>
                                 ))}
@@ -1779,7 +1775,7 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
     <div className="mx-auto bg-[var(--color-surface)] rounded-xl p-6 shadow-lg">
       <button className="bg-none border border-[var(--color-border)] px-3.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer text-[var(--color-muted)] font-[inherit] mb-4 transition-all duration-150 hover:text-[var(--color-primary)] hover:border-[var(--color-primary)]" onClick={onBack}>{"\u2190"} Back to Sessions</button>
       <div className="mb-5">
-        <h2 className="text-xl font-bold mb-2">{shortenProject(summary.project)}</h2>
+        <h2 className="text-xl font-bold mb-2">{formatPath(summary.project)}</h2>
         <div className="flex gap-3 items-center text-[13px] text-[var(--color-muted)] flex-wrap">
           <span>{summary.git_branch ?? "no branch"}</span>
           <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold uppercase ${summary.source === "claude" ? "bg-[rgba(74,144,217,0.15)] text-[var(--color-primary)]" : "bg-[rgba(39,174,96,0.15)] text-[var(--color-cache-read)]"}`}>{summary.source}</span>
@@ -1800,10 +1796,10 @@ function SessionDetailView({ detail, onBack }: { detail: SessionDetail; onBack: 
           <MetricCard label="Ephemeral Cache" value={formatTokens(summary.ephemeral_5m_tokens + summary.ephemeral_1h_tokens)} sub={`5m: ${formatTokens(summary.ephemeral_5m_tokens)} / 1h: ${formatTokens(summary.ephemeral_1h_tokens)}`} />
         )}
       </div>
-      {detail.content_analysis && <ContentAnalysisView analysis={detail.content_analysis} />}
+      {detail.content_analysis && <ContentAnalysisView analysis={detail.content_analysis} project={summary.project} />}
       {detail.cache_savings && <CacheSavingsView report={detail.cache_savings} />}
       <ContextGrowthChart turns={turns} />
-      <TurnByTurnTable turns={turns} maxTurnCost={maxTurnCost} contentItems={detail.content_analysis?.all_items ?? []} />
+      <TurnByTurnTable turns={turns} maxTurnCost={maxTurnCost} contentItems={detail.content_analysis?.all_items ?? []} project={summary.project} />
     </div>
   );
 }
@@ -2071,6 +2067,7 @@ function App() {
       .catch(() => setGrants({ sandboxed: false, claude: true, codex: true }));
   }, []);
 
+  useEffect(() => { initHomeDir(); }, []);
   useEffect(() => { refreshGrants(); }, [refreshGrants]);
 
   // Only load data once folder access is available (sandboxed builds need the
@@ -2206,7 +2203,7 @@ function App() {
               exit={{ opacity: 0, height: 0 }}
               className="flex items-center gap-3 px-3 py-2 bg-[rgba(74,144,217,0.08)] border border-[rgba(74,144,217,0.2)] rounded-md mb-4 text-[13px] overflow-hidden"
             >
-              <span>Filtered by project: <strong>{shortenProject(projectFilter)}</strong></span>
+              <span>Filtered by project: <strong>{formatPath(projectFilter)}</strong></span>
               <button className="bg-none border border-[var(--color-border)] px-2.5 py-1 rounded text-xs cursor-pointer text-[var(--color-muted)] font-[inherit] transition-all duration-150 hover:text-[var(--color-output)] hover:border-[var(--color-output)]" onClick={() => setProjectFilter(null)}>Clear filter</button>
             </motion.div>
           )}
