@@ -6,6 +6,28 @@ export async function initHomeDir(): Promise<void> {
   _homeDir = (await tauriHomeDir()) ?? null;
 }
 
+function relativeToBase(path: string, basePath: string): string | null {
+  for (const marker of ["/.worktrees/", "/.claude/worktrees/"]) {
+    const idx = path.indexOf(marker);
+    if (idx !== -1) {
+      const repoRoot = path.slice(0, idx);
+      if (!basePath.startsWith(repoRoot) && !repoRoot.startsWith(basePath)) return null;
+
+      const after = path.slice(idx + marker.length);
+      const slash = after.indexOf("/");
+      const effectiveBase = slash !== -1
+        ? path.slice(0, idx + marker.length + slash)
+        : path;
+
+      const rel = path.slice(effectiveBase.length).replace(/^\//, "");
+      return rel || null;
+    }
+  }
+
+  if (!path.startsWith(basePath)) return null;
+  return path.slice(basePath.length).replace(/^\//, "");
+}
+
 export function formatPath(path: string, maxSegments = 3, basePath?: string): string {
   let result = path;
   if (_homeDir && path.startsWith(_homeDir)) {
@@ -13,17 +35,15 @@ export function formatPath(path: string, maxSegments = 3, basePath?: string): st
   }
 
   if (basePath) {
-    if (path.startsWith(basePath)) {
-      const rel = path.slice(basePath.length).replace(/^\//, "");
-      if (rel) return rel;
-    }
+    const rel = relativeToBase(path, basePath);
+    if (rel) return rel;
     let base = basePath;
     if (_homeDir && base.startsWith(_homeDir)) {
       base = "~" + base.slice(_homeDir.length);
     }
     if (result.startsWith(base + "/")) {
-      const rel = result.slice(base.length + 1);
-      if (rel) return rel;
+      const rel2 = result.slice(base.length + 1);
+      if (rel2) return rel2;
     }
   }
 
