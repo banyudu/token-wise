@@ -7,7 +7,7 @@ pub mod path_install;
 #[cfg(feature = "updater")]
 pub mod updater;
 
-use models::{OverviewMetrics, SessionDetail, SessionSummary};
+use models::{OverviewMetrics, PaginatedSessions, SessionDetail, SessionSummary};
 
 #[tauri::command]
 async fn get_overview() -> OverviewMetrics {
@@ -23,6 +23,16 @@ async fn get_sessions() -> Vec<SessionSummary> {
     let mut sessions = parser::load_claude_sessions(pricing);
     sessions.extend(parser::load_codex_sessions(pricing));
     sessions
+}
+
+#[tauri::command]
+async fn get_sessions_page(offset: usize, limit: usize) -> PaginatedSessions {
+    let pricing = parser::get_cached_pricing();
+    let mut sessions = parser::load_claude_sessions(pricing);
+    sessions.extend(parser::load_codex_sessions(pricing));
+    let total = sessions.len();
+    let page: Vec<_> = sessions.into_iter().skip(offset).take(limit).collect();
+    PaginatedSessions { sessions: page, total }
 }
 
 #[tauri::command]
@@ -75,6 +85,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_overview,
             get_sessions,
+            get_sessions_page,
             refresh_sessions,
             get_session_detail,
             cli_path_status,

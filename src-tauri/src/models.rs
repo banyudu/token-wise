@@ -77,6 +77,12 @@ pub struct SessionSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginatedSessions {
+    pub sessions: Vec<SessionSummary>,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnMetrics {
     pub turn_index: u32,
     pub role: String,

@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { invoke } from "@tauri-apps/api/core";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { motion, AnimatePresence } from "framer-motion";
-import type { CostBreakdown, OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem, CacheSavingsReport, CliStatus, CliInstallResult } from "./types";
+import type { CostBreakdown, OverviewMetrics, SessionSummary, ProjectSummary, SessionDetail, TurnMetrics, ContentAnalysis, ContentCategory, ContentItem, CacheSavingsReport, CliStatus, CliInstallResult, PaginatedSessions } from "./types";
 import { codeToHtml } from "shiki";
 import ReactMarkdown from "react-markdown";
 import { LoadingScreen } from "./LoadingScreen";
@@ -2025,6 +2025,11 @@ function App() {
   const [filter, setFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
+  const [loadedPages, setLoadedPages] = useState(0);
+  const [totalSessionCount, setTotalSessionCount] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const PAGE_SIZE = 100;
 
   const handleSort = (field: SortField) => {
     if (field === sortField) {
@@ -2035,20 +2040,51 @@ function App() {
 
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
-    try { setAllSessions(await invoke<SessionSummary[]>("get_sessions")); }
+    setAllSessions([]); setLoadedPages(0);
+    try {
+      const result = await invoke<PaginatedSessions>("get_sessions_page", { offset: 0, limit: PAGE_SIZE });
+      setAllSessions(result.sessions);
+      setTotalSessionCount(result.total);
+      setLoadedPages(1);
+    }
     catch (e) { setError(String(e)); }
     finally { setLoading(false); }
   }, []);
 
-  const refreshData = useCallback(() => {
-    setRefreshing(true); setError(null);
-    // Defer invoke to next frame so React renders the loading state first
-    requestAnimationFrame(() => {
-      invoke<SessionSummary[]>("refresh_sessions")
-        .then((data) => setAllSessions(data))
+  const pageOffsetRef = useRef(0);
+
+  useEffect(() => {
+    if (loadedPages > 0 && allSessions.length > 0) {
+      pageOffsetRef.current = allSessions.length;
+    }
+  }, [loadedPages, allSessions.length]);
+
+  useEffect(() => {
+    const offset = pageOffsetRef.current;
+    if (loadedPages > 0 && offset < totalSessionCount && !loadingMore) {
+      setLoadingMore(true);
+      invoke<PaginatedSessions>("get_sessions_page", { offset, limit: PAGE_SIZE })
+        .then((result) => {
+          setAllSessions((prev) => [...prev, ...result.sessions]);
+          setTotalSessionCount(result.total);
+          setLoadedPages((prev) => prev + 1);
+        })
         .catch((e) => setError(String(e)))
-        .finally(() => setRefreshing(false));
-    });
+        .finally(() => setLoadingMore(false));
+    }
+  }, [loadedPages]);
+
+  const refreshData = useCallback(async () => {
+    setRefreshing(true); setError(null);
+    setAllSessions([]); setLoadedPages(0);
+    try {
+      const result = await invoke<PaginatedSessions>("get_sessions_page", { offset: 0, limit: PAGE_SIZE });
+      setAllSessions(result.sessions);
+      setTotalSessionCount(result.total);
+      setLoadedPages(1);
+    }
+    catch (e) { setError(String(e)); }
+    finally { setRefreshing(false); }
   }, []);
 
   const loadSessionDetail = useCallback(async (sessionId: string) => {
@@ -2191,6 +2227,17 @@ function App() {
               customFrom={customDateFrom} customTo={customDateTo}
               onCustomFromChange={setCustomDateFrom} onCustomToChange={setCustomDateTo} />
           </div>
+          {loadingMore && (
+            <div className="pb-3">
+              <div className="flex items-center gap-2 text-[11px] text-[var(--color-muted)] mb-1">
+                <span>Loading sessions...</span>
+                <span>{allSessions.length} / {totalSessionCount}</span>
+              </div>
+              <div className="h-1 bg-[var(--color-border)] rounded-full overflow-hidden">
+                <div className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-300" style={{ width: `${totalSessionCount > 0 ? (allSessions.length / totalSessionCount) * 100 : 0}%` }} />
+              </div>
+            </div>
+          )}
         </div>
       </header>
       <main className="mx-auto px-5">

@@ -29,6 +29,11 @@ export interface SessionSummary {
   ephemeral_1h_tokens: number;
 }
 
+export interface PaginatedSessions {
+  sessions: SessionSummary[];
+  total: number;
+}
+
 export interface ProjectSummary {
   project: string;
   session_count: number;
