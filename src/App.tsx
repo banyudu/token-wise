@@ -121,6 +121,7 @@ function computeOverview(sessions: SessionSummary[]): OverviewMetrics {
   let breakdown: CostBreakdown = { ...EMPTY_BREAKDOWN };
   const projectMap = new Map<string, SessionSummary[]>();
   const dailyMap = new Map<string, { cost: number; bd: CostBreakdown; input: number; output: number; cw: number; cr: number; source: string }>();
+  const hourlyMap = new Map<string, { cost: number; bd: CostBreakdown; input: number; output: number; cw: number; cr: number; source: string }>();
   let systemOverhead = 0;
 
   for (const s of sessions) {
@@ -135,16 +136,36 @@ function computeOverview(sessions: SessionSummary[]): OverviewMetrics {
     projectMap.get(key)!.push(s);
     if (s.first_timestamp) {
       const date = s.first_timestamp.slice(0, 10);
-      const existing = dailyMap.get(date);
-      if (existing) {
-        existing.cost += s.estimated_cost_usd;
-        existing.bd = addBreakdown(existing.bd, s.cost_breakdown);
-        existing.input += s.total_input_tokens;
-        existing.output += s.total_output_tokens;
-        existing.cw += s.total_cache_write_tokens;
-        existing.cr += s.total_cache_read_tokens;
+      const existingD = dailyMap.get(date);
+      if (existingD) {
+        existingD.cost += s.estimated_cost_usd;
+        existingD.bd = addBreakdown(existingD.bd, s.cost_breakdown);
+        existingD.input += s.total_input_tokens;
+        existingD.output += s.total_output_tokens;
+        existingD.cw += s.total_cache_write_tokens;
+        existingD.cr += s.total_cache_read_tokens;
       } else {
         dailyMap.set(date, {
+          cost: s.estimated_cost_usd,
+          bd: { ...s.cost_breakdown },
+          input: s.total_input_tokens,
+          output: s.total_output_tokens,
+          cw: s.total_cache_write_tokens,
+          cr: s.total_cache_read_tokens,
+          source: s.source,
+        });
+      }
+      const hour = s.first_timestamp.slice(0, 13);
+      const existingH = hourlyMap.get(hour);
+      if (existingH) {
+        existingH.cost += s.estimated_cost_usd;
+        existingH.bd = addBreakdown(existingH.bd, s.cost_breakdown);
+        existingH.input += s.total_input_tokens;
+        existingH.output += s.total_output_tokens;
+        existingH.cw += s.total_cache_write_tokens;
+        existingH.cr += s.total_cache_read_tokens;
+      } else {
+        hourlyMap.set(hour, {
           cost: s.estimated_cost_usd,
           bd: { ...s.cost_breakdown },
           input: s.total_input_tokens,
@@ -176,6 +197,10 @@ function computeOverview(sessions: SessionSummary[]): OverviewMetrics {
     date, cost_usd: d.cost, cost_breakdown: d.bd, input_tokens: d.input, output_tokens: d.output, cache_write_tokens: d.cw, cache_read_tokens: d.cr, source: d.source,
   })).sort((a, b) => a.date.localeCompare(b.date));
 
+  const hourlyCosts = Array.from(hourlyMap.entries()).map(([hour, d]) => ({
+    hour, cost_usd: d.cost, cost_breakdown: d.bd, input_tokens: d.input, output_tokens: d.output, cache_write_tokens: d.cw, cache_read_tokens: d.cr, source: d.source,
+  })).sort((a, b) => a.hour.localeCompare(b.hour));
+
   const topSessions = [...sessions]
     .sort((a, b) => b.estimated_cost_usd - a.estimated_cost_usd)
     .slice(0, 20);
@@ -185,7 +210,7 @@ function computeOverview(sessions: SessionSummary[]): OverviewMetrics {
     total_cache_write_tokens: totalCacheWrite, total_cache_read_tokens: totalCacheRead,
     avg_cache_hit_rate: totalCtx > 0 ? totalCacheRead / totalCtx : 0,
     cost_breakdown: breakdown,
-    estimated_system_overhead_tokens: systemOverhead, daily_costs: dailyCosts, project_summaries: projectSummaries, top_sessions: topSessions,
+    estimated_system_overhead_tokens: systemOverhead, daily_costs: dailyCosts, hourly_costs: hourlyCosts, project_summaries: projectSummaries, top_sessions: topSessions,
   };
 }
 
@@ -310,19 +335,22 @@ function CostBar({ breakdown }: { breakdown: OverviewMetrics["cost_breakdown"] }
   );
 }
 
-function DailyCostChart({ dailyCosts }: { dailyCosts: OverviewMetrics["daily_costs"] }) {
-  if (dailyCosts.length === 0) return null;
-  const maxCost = Math.max(...dailyCosts.map((d) => d.cost_usd), 0.01);
+function DailyCostChart({ dailyCosts, hourlyCosts, showHourly }: { dailyCosts: OverviewMetrics["daily_costs"]; hourlyCosts: OverviewMetrics["hourly_costs"]; showHourly: boolean }) {
+  const items = showHourly ? hourlyCosts : dailyCosts;
+  if (items.length === 0) return null;
+  const maxCost = Math.max(...items.map((d) => d.cost_usd), 0.01);
+  const getKey = (d: typeof items[number]) => showHourly ? (d as { hour: string }).hour : (d as { date: string }).date;
+  const getLabel = (d: typeof items[number]) => showHourly ? (d as { hour: string }).hour.slice(11) : (d as { date: string }).date.slice(5);
   return (
     <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4 mb-6">
-      <h3 className="text-sm font-semibold mb-3">Daily Cost ({dailyCosts.length} days)</h3>
+      <h3 className="text-sm font-semibold mb-3">{showHourly ? "Hourly" : "Daily"} Cost ({items.length} {showHourly ? "hours" : "days"})</h3>
       <div className="flex gap-0.5">
-        {dailyCosts.map((d) => {
+        {items.map((d) => {
           const bd = d.cost_breakdown;
           const barTotal = bd.input_cost + bd.output_cost + bd.cache_write_cost + bd.cache_read_cost;
           const heightPct = (d.cost_usd / maxCost) * 100;
           return (
-            <div key={d.date} className="flex-1 flex flex-col items-center" title={`${d.date}: ${formatCost(d.cost_usd)}`}>
+            <div key={getKey(d)} className="flex-1 flex flex-col items-center" title={`${getKey(d)}: ${formatCost(d.cost_usd)}`}>
               <div className="w-full h-[120px] flex flex-col justify-end">
                 <div className="w-full flex flex-col rounded-t-sm overflow-hidden min-h-px" style={{ height: `${heightPct}%` }}>
                   {barTotal > 0 ? (<>
@@ -333,7 +361,7 @@ function DailyCostChart({ dailyCosts }: { dailyCosts: OverviewMetrics["daily_cos
                   </>) : <div className="w-full" style={{ flex: 1, backgroundColor: "var(--color-primary)" }} />}
                 </div>
               </div>
-              <div className="text-[9px] text-[var(--color-muted)] mt-1 [writing-mode:vertical-rl] [text-orientation:mixed] h-9 overflow-hidden">{d.date.slice(5)}</div>
+              <div className="text-[9px] text-[var(--color-muted)] mt-1 truncate max-w-full">{getLabel(d)}</div>
             </div>
           );
         })}
@@ -2139,6 +2167,16 @@ function App() {
 
   const overview = useMemo(() => computeOverview(filteredSessions), [filteredSessions]);
 
+  const showHourly = useMemo(() => {
+    if (dateRange === "today" || dateRange === "yesterday") return true;
+    if (dateRange === "custom" && customDateFrom && customDateTo) {
+      const from = new Date(customDateFrom).getTime();
+      const to = new Date(customDateTo).getTime() + 86400000;
+      return (to - from) <= 48 * 3600000;
+    }
+    return false;
+  }, [dateRange, customDateFrom, customDateTo]);
+
   if (grants == null) return <LoadingScreen message="Starting Token Wise…" />;
   if (grants.sandboxed && !(grants.claude && grants.codex)) {
     return <OnboardingScreen status={grants} onGranted={refreshGrants} />;
@@ -2292,7 +2330,7 @@ function App() {
                 <ContextComposition overview={overview} />
               </motion.div>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
-                <DailyCostChart dailyCosts={overview.daily_costs} />
+                <DailyCostChart dailyCosts={overview.daily_costs} hourlyCosts={overview.hourly_costs} showHourly={showHourly} />
               </motion.div>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}>
                 <Recommendations sessions={filteredSessions} overview={overview} />

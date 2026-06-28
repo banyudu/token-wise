@@ -56,6 +56,17 @@ export interface DailyCost {
   source: string;
 }
 
+export interface HourlyCost {
+  hour: string;
+  cost_usd: number;
+  cost_breakdown: CostBreakdown;
+  input_tokens: number;
+  output_tokens: number;
+  cache_write_tokens: number;
+  cache_read_tokens: number;
+  source: string;
+}
+
 export interface OverviewMetrics {
   total_sessions: number;
   total_cost_usd: number;
@@ -67,6 +78,7 @@ export interface OverviewMetrics {
   cost_breakdown: CostBreakdown;
   estimated_system_overhead_tokens: number;
   daily_costs: DailyCost[];
+  hourly_costs: HourlyCost[];
   project_summaries: ProjectSummary[];
   top_sessions: SessionSummary[];
 }
