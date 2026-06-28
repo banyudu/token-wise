@@ -12,7 +12,7 @@ import "./App.css";
 type Tab = "overview" | "sessions" | "projects";
 type SortField = "cost" | "date" | "input" | "output" | "cache_write" | "cache_read" | "cache_hit" | "messages" | "duration";
 type SortDir = "asc" | "desc";
-type DateRange = "7d" | "30d" | "90d" | "all" | "custom";
+type DateRange = "today" | "yesterday" | "7d" | "30d" | "90d" | "all" | "custom";
 type GrantStatus = { sandboxed: boolean; claude: boolean; codex: boolean };
 
 const EMPTY_BREAKDOWN: CostBreakdown = {
@@ -79,8 +79,29 @@ function formatDuration(ms: number): string {
   return `${days}d ${hours % 24}h`;
 }
 
+function dateBoundary(daysOffset: number): { start: string; end: string } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysOffset);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysOffset + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
 function filterByDateRange(sessions: SessionSummary[], range: DateRange, customFrom?: string, customTo?: string): SessionSummary[] {
   if (range === "all") return sessions;
+  if (range === "today") {
+    const { start, end } = dateBoundary(0);
+    return sessions.filter((s) => {
+      const ts = s.first_timestamp ?? "";
+      return ts >= start && ts < end;
+    });
+  }
+  if (range === "yesterday") {
+    const { start, end } = dateBoundary(-1);
+    return sessions.filter((s) => {
+      const ts = s.first_timestamp ?? "";
+      return ts >= start && ts < end;
+    });
+  }
   if (range === "custom") {
     return sessions.filter((s) => {
       const ts = s.first_timestamp ?? "";
@@ -230,7 +251,7 @@ function DateRangeSelector({ value, onChange, customFrom, customTo, onCustomFrom
   onCustomFromChange: (v: string) => void; onCustomToChange: (v: string) => void;
 }) {
   const presets: { label: string; value: DateRange }[] = [
-    { label: "7 Days", value: "7d" }, { label: "30 Days", value: "30d" }, { label: "90 Days", value: "90d" }, { label: "All Time", value: "all" },
+    { label: "Today", value: "today" }, { label: "Yesterday", value: "yesterday" }, { label: "7 Days", value: "7d" }, { label: "30 Days", value: "30d" }, { label: "90 Days", value: "90d" }, { label: "All Time", value: "all" },
   ];
   const displayValue = value === "custom" && customFrom
     ? `${new Date(customFrom).toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${customTo ? new Date(customTo).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "now"}`
