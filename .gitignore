@@ -26,6 +26,7 @@ dist-ssr
 
 # Swift build artifacts
 src-tauri/swift-plugin/.build/
+apple/.build/
 
 .claude
 *.pkg
