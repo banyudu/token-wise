@@ -1,0 +1,42 @@
+name: CI
+
+# Build and test the native Swift package (apple/). Runs on the self-hosted
+# macOS runner — same infra as release.yml, free, and already has the Swift
+# toolchain. Path-filtered so unrelated changes don't trigger it.
+on:
+  push:
+    branches: [main, swift-rewrite]
+    paths:
+      - "apple/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "apple/**"
+      - ".github/workflows/ci.yml"
+
+# Newer pushes to the same ref supersede in-flight runs (unlike release, which
+# must never be cancelled).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  swift:
+    runs-on: [self-hosted, macOS]
+    defaults:
+      run:
+        working-directory: apple
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
