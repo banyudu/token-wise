@@ -29,7 +29,17 @@ const features = [
     ),
     title: "Multi-Model Support",
     description:
-      "Track tokens across Claude Opus, Sonnet, Haiku, GPT-4.1, GPT-5.2, and more. Switch pricing models on the fly.",
+      "Track tokens across Claude Opus, Sonnet, Haiku, GPT-5, and more — with per-model pricing detected from each session, so mixed-model histories are costed correctly.",
+  },
+  {
+    icon: (
+      <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+      </svg>
+    ),
+    title: "AI Auto-Analyze",
+    description:
+      "One click runs your own claude or codex CLI headlessly over your usage summary and returns prioritized, numbers-grounded fixes — no API key, uses your existing subscription. Coming in the next release.",
   },
   {
     icon: (
@@ -74,11 +84,11 @@ const features = [
 ];
 
 const pricingModels = [
-  { name: "Opus 4", input: "$15.00", output: "$75.00" },
-  { name: "Sonnet 4", input: "$3.00", output: "$15.00" },
-  { name: "Haiku 3.5", input: "$0.80", output: "$4.00" },
-  { name: "GPT-5.4", input: "$2.50", output: "$10.00" },
-  { name: "GPT-5.2", input: "$1.25", output: "$5.00" },
+  { name: "Claude Opus 4.x", input: "$15.00", output: "$75.00" },
+  { name: "Claude Sonnet 4.x / 5", input: "$3.00", output: "$15.00" },
+  { name: "Claude Haiku 4.5", input: "$1.00", output: "$5.00" },
+  { name: "GPT-5.x", input: "$1.25", output: "$10.00" },
+  { name: "GPT-5 mini", input: "$0.25", output: "$2.00" },
   { name: "GPT-4.1", input: "$2.00", output: "$8.00" },
 ];
 
@@ -95,6 +105,7 @@ export default function Home() {
           <div className="hidden sm:flex items-center gap-8 text-sm text-neutral-600 dark:text-neutral-400">
             <a href="#features" className="hover:text-foreground transition-colors">Features</a>
             <a href="#cli" className="hover:text-foreground transition-colors">CLI</a>
+            <a href="#analyze" className="hover:text-foreground transition-colors">AI Analyze</a>
             <a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a>
             <a href="#models" className="hover:text-foreground transition-colors">Models</a>
           </div>
@@ -259,9 +270,6 @@ export default function Home() {
       <section id="cli" className="py-24 px-6">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-12">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal/10 text-teal dark:text-lime text-sm font-medium mb-4">
-              New in 0.1.5
-            </div>
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">Use it from the terminal</h2>
             <p className="text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">
               The same binary doubles as a CLI. Pipe it into scripts, drop it in your status bar, or just check your spend without leaving the shell.
@@ -304,6 +312,60 @@ export default function Home() {
         </div>
       </section>
 
+      {/* AI Analyze */}
+      <section id="analyze" className="py-24 px-6 bg-neutral-50 dark:bg-neutral-900/50">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-12">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal/10 text-teal dark:text-lime text-sm font-medium mb-4">
+              Coming in the next release
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-bold mb-4">
+              Let your own AI find the savings
+            </h2>
+            <p className="text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">
+              Token Wise discovers the <span className="font-mono text-sm">claude</span> or{" "}
+              <span className="font-mono text-sm">codex</span> CLI already on your machine and runs it
+              headlessly over a summary of your usage — using your existing subscription, no API key.
+              You get prioritized, numbers-grounded fixes and a plain-English read on where the money goes.
+            </p>
+          </div>
+          <div className="bg-neutral-950 dark:bg-neutral-900 text-neutral-100 rounded-2xl border border-neutral-800 overflow-hidden font-mono text-sm">
+            <div className="flex items-center gap-2 px-4 py-3 bg-neutral-900/60 border-b border-neutral-800">
+              <div className="w-3 h-3 rounded-full bg-red-400" />
+              <div className="w-3 h-3 rounded-full bg-yellow-400" />
+              <div className="w-3 h-3 rounded-full bg-green-400" />
+              <span className="ml-3 text-xs text-neutral-500">~/dev</span>
+            </div>
+            <pre className="p-6 overflow-x-auto leading-relaxed whitespace-pre-wrap">
+              <span className="text-lime">$</span> token-wise analyze{"\n"}
+              Analyzing with codex (this can take a minute)…{"\n"}
+              {"\n"}
+              <span className="text-neutral-100 font-semibold">## Actionable fixes</span>{"\n"}
+              {"\n"}
+              1. <span className="text-neutral-300">Move routine work off the premium model — it&apos;s 74% of all spend. Even a 10% shift targets ~$2.8K.</span>{"\n"}
+              2. <span className="text-neutral-300">Trim startup context: ~23K tokens/session paid on every session start. Shrink CLAUDE.md and always-loaded skills.</span>{"\n"}
+              3. <span className="text-neutral-300">Batch the 86 short sessions (&le;4 messages, &gt;$0.50) — each repeats the full cache-write tax.</span>{"\n"}
+              {"\n"}
+              <span className="text-neutral-100 font-semibold">## Narrative</span>{"\n"}
+              {"\n"}
+              <span className="text-neutral-300">Most spend concentrates in one project and one premium model. Cache hit rate is already strong, so the biggest lever is reducing repeated context volume…</span>
+            </pre>
+          </div>
+          <div className="mt-6 grid sm:grid-cols-3 gap-4 text-sm">
+            {[
+              { title: "Your subscription, not an API key", body: "Runs claude -p or codex exec with the login you already have. No extra account, no per-call billing surprise." },
+              { title: "Grounded in your real numbers", body: "The model sees an aggregate summary computed locally — spend, cache rates, overhead, top projects — and must cite it." },
+              { title: "In the app and the CLI", body: "Use the Analyze tab in the app, or `token-wise analyze` in scripts. Both pick whichever engine you have installed." },
+            ].map((c) => (
+              <div key={c.title} className="bg-white dark:bg-neutral-800/50 rounded-xl border border-neutral-200 dark:border-neutral-800 p-5">
+                <div className="font-semibold mb-1.5">{c.title}</div>
+                <p className="text-neutral-600 dark:text-neutral-400 leading-relaxed">{c.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Pricing */}
       <section id="pricing" className="py-24 px-6">
         <div className="max-w-3xl mx-auto text-center">
@@ -329,6 +391,7 @@ export default function Home() {
                   "All AI models supported",
                   "Per-project cost breakdown",
                   "Session deep-dive with turn analysis",
+                  "AI auto-analyze via your own claude/codex CLI (coming soon)",
                   "Cache hit rate analytics",
                   "Cache savings detector (wasted writes, invalidations, unreferenced context)",
                   "100% offline — your data stays local",
