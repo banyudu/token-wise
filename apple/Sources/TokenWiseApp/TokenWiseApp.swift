@@ -9,10 +9,16 @@ struct TokenWiseApp: App {
         Window("Token Wise", id: "main") {
             ContentView()
                 .environmentObject(model)
-                .frame(minWidth: 900, minHeight: 600)
-                .onAppear { if model.sessions.isEmpty { model.load() } }
+                .frame(minWidth: 960, minHeight: 620)
+                .onAppear { if model.allSessions.isEmpty { model.load() } }
         }
         .windowResizability(.contentMinSize)
+
+        // Native Settings window (⌘,).
+        Settings {
+            SettingsPane()
+                .environmentObject(model)
+        }
 
         MenuBarExtra {
             MenuBarView()
@@ -35,7 +41,7 @@ struct MenuBarView: View {
             Divider()
             row("Today", model.todayCost)
             row("All time", model.totalCost)
-            row("Sessions", Double(model.sessions.count), isCount: true)
+            row("Sessions", Double(model.allSessions.count), isCount: true)
             Divider()
             HStack {
                 Button("Open") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }

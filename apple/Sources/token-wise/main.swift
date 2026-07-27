@@ -18,6 +18,7 @@ guard let command = args.first else {
       token-wise total [--json]
       token-wise today [--json]
       token-wise sessions [--limit N] [--json]
+      token-wise savings SESSION_ID [--json]
       token-wise analyze [--engine claude|codex] [--model NAME] [--json]
     """)
     exit(0)
@@ -82,6 +83,49 @@ case "sessions":
                   + Format.cost(s.estimatedCostUsd).leftPad(10) + " "
                   + Format.tokens(tokens).leftPad(8) + " "
                   + Format.percent(s.cacheHitRate).leftPad(7))
+        }
+    }
+
+case "savings":
+    guard let sessionId = rest.first(where: { !$0.hasPrefix("--") }) else {
+        fail("Usage: token-wise savings SESSION_ID [--json]")
+    }
+    guard let detail = ClaudeParser.sessionDetail(id: sessionId, pricing: pricing),
+          let report = detail.cacheSavings else {
+        fail("Session not found (savings analysis is Claude-only): \(sessionId)")
+    }
+    if flag("--json") {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(report), let s = String(data: data, encoding: .utf8) {
+            print(s)
+        }
+    } else {
+        print("Potential savings: \(Format.cost(report.totalPotentialSavingsUsd)) (heuristic)")
+        if !report.wastedCacheWrites.isEmpty {
+            print("\nWasted cache writes (\(report.wastedCacheWrites.count)):")
+            for w in report.wastedCacheWrites.prefix(10) {
+                print("  turn \(w.turnIndex + 1): \(Format.tokens(w.wastedTokens)) wasted (\(Format.cost(w.wastedCostUsd))) — \(w.reason)")
+            }
+        }
+        if !report.invalidationEvents.isEmpty {
+            print("\nCache prefix invalidations (\(report.invalidationEvents.count)):")
+            for e in report.invalidationEvents.prefix(10) {
+                let cause = e.suspectedCause.map { " — suspected: \($0)" } ?? ""
+                print("  turn \(e.turnIndex + 1): \(Format.tokens(e.droppedTokens)) dropped (\(Format.cost(e.rewriteCostUsd)))\(cause)")
+            }
+        }
+        if !report.unreferencedBlocks.isEmpty {
+            print("\nUnreferenced context blocks (\(report.unreferencedBlocks.count)):")
+            for b in report.unreferencedBlocks.prefix(10) {
+                print("  turn \(b.turnIndex + 1): \(b.label), \(Format.tokens(b.estimatedTokens)) carried \(b.carriedTurns) turns (\(Format.cost(b.wastedCostUsd)))")
+            }
+        }
+        if !report.repeatedBlocks.isEmpty {
+            print("\nRepeated content blocks (\(report.repeatedBlocks.count)):")
+            for b in report.repeatedBlocks.prefix(10) {
+                print("  \(b.occurrences)x turns \(b.firstTurn + 1)–\(b.lastTurn + 1): \(Format.tokens(b.estimatedTokensEach)) each (\(Format.cost(b.wastedCostUsd)))")
+            }
         }
     }
 

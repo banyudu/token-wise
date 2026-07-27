@@ -60,7 +60,15 @@ public struct CostBreakdown: Codable, Equatable {
     }
 }
 
-public struct SessionSummary: Codable, Identifiable {
+public struct SessionSummary: Codable, Identifiable, Hashable {
+    public static func == (lhs: SessionSummary, rhs: SessionSummary) -> Bool {
+        lhs.sessionId == rhs.sessionId && lhs.lastTimestamp == rhs.lastTimestamp
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(sessionId)
+    }
+
     public var sessionId: String
     public var project: String
     public var gitBranch: String?
@@ -136,6 +144,7 @@ public struct SessionDetail: Codable {
     public var summary: SessionSummary
     public var turns: [TurnMetrics]
     public var contentAnalysis: ContentAnalysis?
+    public var cacheSavings: CacheSavingsReport?
 }
 
 public struct ProjectSummary: Codable, Identifiable {

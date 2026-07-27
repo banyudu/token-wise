@@ -294,7 +294,10 @@ public enum ClaudeParser {
             summary.project = Paths.normalizeProjectPath(Paths.decodeProjectName(dir))
         }
         let analysis = ContentAnalyzer.analyze(messages)
-        return SessionDetail(summary: summary, turns: turns, contentAnalysis: analysis)
+        let savings = CacheSavings.analyze(messages: messages, turns: turns,
+                                           pricing: pricing.info(summary.model ?? ""))
+        return SessionDetail(summary: summary, turns: turns, contentAnalysis: analysis,
+                             cacheSavings: savings)
     }
 
     // MARK: Helpers

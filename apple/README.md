@@ -32,10 +32,16 @@ swift test
 .build/release/token-wise total
 .build/release/token-wise today
 .build/release/token-wise sessions --limit 10
+.build/release/token-wise savings SESSION_ID # per-session cache-waste report
 .build/release/token-wise analyze            # AI advice via your local claude/codex
 
 # GUI (menu-bar cost readout + dashboard window)
 swift run -c release TokenWiseApp
+
+# Distributable .app bundle (GUI + CLI inside, signed when
+# APPLE_SIGNING_IDENTITY is set; `appstore` uses sandbox entitlements)
+../scripts/build-swift-app.sh dev        # → ../dist-swift/token-wise.app
+../scripts/build-swift-app.sh appstore
 ```
 
 ## Performance
@@ -60,10 +66,22 @@ aggregate summary of your usage and asks for:
 
 ## Status
 
-Ported and working: models, pricing (with current-gen models + a fallback
-flag), Claude + Codex parsing, overview/daily/hourly/project aggregation,
-content analysis, CLI, menu-bar + dashboard GUI, and the AI analyzer.
+Fully ported: models, pricing (with current-gen models + a fallback flag),
+Claude + Codex parsing, overview/daily/hourly/project aggregation, content
+analysis, the per-session cache-savings analyzer (four heuristics: wasted
+writes, prefix invalidations, unreferenced blocks, repeated blocks), CLI
+(incl. `savings`), the AI analyzer, and App Store sandbox handling (folder
+grants via native picker + security-scoped bookmarks in `Grants.swift`, with
+onboarding and Settings re-grant UI; non-sandboxed builds read the home dir
+directly).
 
-Deferred: the per-session cache-savings analyzer (`cache_savings.rs`), the
-turn-by-turn detail charts in the GUI, and App Store sandbox/bookmark handling
-for distribution.
+The GUI is a native macOS app rather than a web-port: `NavigationSplitView`
+sidebar, toolbar filter menus (source + date range with custom pickers),
+native Settings window (⌘,), sortable `Table`s with `.searchable` filtering,
+Swift Charts everywhere (stacked daily/hourly cost bars, per-turn context
+growth with cumulative/cost modes, content-category donut), push-navigation
+session detail with the cache-savings report and turn-by-turn metrics, plus
+the menu-bar cost readout.
+
+`scripts/build-swift-app.sh` assembles and signs `token-wise.app` (GUI + CLI
+in one bundle) for the `dev` or `appstore` channel.

@@ -1,15 +1,15 @@
 import Foundation
 
-/// Filesystem locations and project-path helpers. The Swift build reads
-/// `~/.claude` and `~/.codex` directly (no App Store sandbox bookmark layer yet
-/// — that returns when we tackle distribution).
+/// Filesystem locations and project-path helpers. Non-sandboxed builds read
+/// `~/.claude` and `~/.codex` directly; App Store (sandboxed) builds go
+/// through the security-scoped bookmarks in `Grants`.
 public enum Paths {
     public static var home: URL {
         URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
 
     public static var claudeRoot: URL? {
-        let url = home.appendingPathComponent(".claude", isDirectory: true)
+        guard let url = Grants.root(for: .claude) else { return nil }
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
@@ -18,7 +18,7 @@ public enum Paths {
     }
 
     public static var codexRoot: URL? {
-        let url = home.appendingPathComponent(".codex", isDirectory: true)
+        guard let url = Grants.root(for: .codex) else { return nil }
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 

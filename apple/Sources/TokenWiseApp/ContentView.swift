@@ -6,53 +6,193 @@ enum MainTab: String, CaseIterable, Identifiable {
     case sessions = "Sessions"
     case projects = "Projects"
     case analyze = "Analyze"
+
     var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .overview: return "chart.bar.xaxis"
+        case .sessions: return "list.bullet.rectangle"
+        case .projects: return "folder"
+        case .analyze: return "sparkles"
+        }
+    }
+}
+
+// Sortable, non-optional accessors for Table comparators.
+extension SessionSummary {
+    var dateKey: String { firstTimestamp ?? "" }
+    var titleText: String { title ?? "" }
+    var branchText: String { gitBranch ?? "" }
+    var durationMs: Double { Format.sessionDurationMs(self) }
 }
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
-    @State private var tab: MainTab = .overview
+    @State private var tab: MainTab? = .overview
+    @State private var path: [SessionSummary] = []
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            Group {
-                if model.loading && model.overview == nil {
-                    ProgressView("Loading usage data…").frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = model.error {
-                    Text("Error: \(error)").foregroundStyle(.red).padding()
-                } else if let overview = model.overview {
-                    switch tab {
-                    case .overview: OverviewTab(overview: overview, sessions: model.sessions)
-                    case .sessions: SessionsTab(sessions: model.sessions)
-                    case .projects: ProjectsTab(projects: overview.projectSummaries)
-                    case .analyze: AnalyzeTab()
-                    }
+        if model.needsOnboarding {
+            OnboardingView()
+        } else {
+            NavigationSplitView {
+                sidebar
+            } detail: {
+                NavigationStack(path: $path) {
+                    tabRoot
+                        .navigationDestination(for: SessionSummary.self) { session in
+                            SessionDetailScreen(session: session)
+                        }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 16) {
-            Text("Token Wise").font(.title2.bold())
-            Picker("", selection: $tab) {
+    private var sidebar: some View {
+        List(selection: $tab) {
+            Section("Usage") {
                 ForEach(MainTab.allCases) { t in
-                    Text(t == .sessions ? "Sessions (\(model.sessions.count))" : t.rawValue).tag(t)
+                    Label(t.rawValue, systemImage: t.icon)
+                        .badge(t == .sessions ? model.sessions.count : 0)
+                        .tag(t)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 460)
-            Spacer()
-            if model.loading { ProgressView().controlSize(.small) }
-            Button { model.load(force: true) } label: { Image(systemName: "arrow.clockwise") }
-                .disabled(model.loading)
-                .keyboardShortcut("r")
         }
-        .padding(.horizontal, 20).padding(.vertical, 12)
+        .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 260)
+    }
+
+    @ViewBuilder
+    private var tabRoot: some View {
+        Group {
+            if model.loading && model.overview == nil {
+                ProgressView("Loading usage data…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = model.error {
+                ContentUnavailableView("Couldn't load usage data", systemImage: "exclamationmark.triangle",
+                                       description: Text(error))
+            } else if let overview = model.overview {
+                switch tab ?? .overview {
+                case .overview:
+                    OverviewTab(overview: overview, sessions: model.sessions,
+                                showHourly: model.showHourly)
+                case .sessions:
+                    SessionsTab(sessions: model.sessions) { path.append($0) }
+                case .projects:
+                    ProjectsTab(projects: overview.projectSummaries) { project in
+                        model.projectFilter = project
+                        tab = .sessions
+                    }
+                case .analyze:
+                    AnalyzeTab()
+                }
+            }
+        }
+        .navigationTitle(tab?.rawValue ?? "Token Wise")
+        .navigationSubtitle(subtitle)
+        .toolbar { toolbarContent }
+        .safeAreaInset(edge: .top, spacing: 0) { activeFilterBar }
+    }
+
+    private var subtitle: String {
+        guard let overview = model.overview else { return "" }
+        return "\(Format.cost(overview.totalCostUsd)) · \(overview.totalSessions) sessions"
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItemGroup {
+            if model.loading { ProgressView().controlSize(.small) }
+
+            Picker(selection: $model.sourceFilter) {
+                ForEach(SourceFilter.allCases) { s in Text(s.rawValue).tag(s) }
+            } label: {
+                Label("Source", systemImage: "square.stack.3d.up")
+            }
+            .pickerStyle(.menu)
+
+            Picker(selection: $model.dateRange) {
+                ForEach(DateRange.allCases) { r in Text(r.rawValue).tag(r) }
+            } label: {
+                Label("Range", systemImage: "calendar")
+            }
+            .pickerStyle(.menu)
+
+            Button {
+                model.load(force: true)
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .disabled(model.loading)
+            .keyboardShortcut("r")
+
+            SettingsLink {
+                Label("Settings", systemImage: "gearshape")
+            }
+        }
+    }
+
+    /// Secondary bar shown only when a custom date range or project filter is active.
+    @ViewBuilder
+    private var activeFilterBar: some View {
+        if model.dateRange == .custom || model.projectFilter != nil {
+            HStack(spacing: 12) {
+                if model.dateRange == .custom {
+                    DatePicker("From", selection: $model.customFrom, displayedComponents: .date)
+                        .datePickerStyle(.compact).fixedSize()
+                    DatePicker("To", selection: $model.customTo, displayedComponents: .date)
+                        .datePickerStyle(.compact).fixedSize()
+                }
+                if let project = model.projectFilter {
+                    HStack(spacing: 5) {
+                        Image(systemName: "folder")
+                        Text(Format.path(project)).lineLimit(1).truncationMode(.middle)
+                        Button {
+                            model.projectFilter = nil
+                        } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain)
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.selection.opacity(0.5), in: Capsule())
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(.bar)
+            .overlay(alignment: .bottom) { Divider() }
+        }
+    }
+}
+
+// MARK: - Session detail (native push)
+
+struct SessionDetailScreen: View {
+    let session: SessionSummary
+    @State private var detail: SessionDetail?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let detail {
+                SessionDetailView(detail: detail)
+            } else if failed {
+                ContentUnavailableView("No detail available", systemImage: "doc.questionmark",
+                                       description: Text("Turn-level detail exists only for Claude transcripts."))
+            } else {
+                ProgressView("Loading session detail…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .navigationTitle(session.title ?? Format.path(session.project))
+        .task(id: session.sessionId) {
+            let id = session.sessionId
+            let loaded = await Task.detached(priority: .userInitiated) {
+                ClaudeParser.sessionDetail(id: id, pricing: PricingTable.load())
+            }.value
+            detail = loaded
+            failed = loaded == nil
+        }
     }
 }
 
@@ -61,23 +201,14 @@ struct ContentView: View {
 struct OverviewTab: View {
     let overview: OverviewMetrics
     let sessions: [SessionSummary]
+    let showHourly: Bool
 
     private var fallbackCount: Int { sessions.filter { $0.pricedByFallback }.count }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
-                    MetricCard(label: "Total Cost", value: Format.cost(overview.totalCostUsd),
-                               sub: overview.totalSessions > 0 ? "\(Format.cost(overview.totalCostUsd / Double(overview.totalSessions))) avg/session" : nil)
-                    MetricCard(label: "Sessions", value: String(overview.totalSessions), sub: nil)
-                    MetricCard(label: "Cache Hit Rate", value: Format.percent(overview.avgCacheHitRate), sub: "higher is better")
-                    MetricCard(label: "System Overhead", value: Format.tokens(overview.estimatedSystemOverheadTokens), sub: "median/session")
-                    MetricCard(label: "Input", value: Format.tokens(overview.totalInputTokens), sub: Format.cost(overview.costBreakdown.inputCost))
-                    MetricCard(label: "Output", value: Format.tokens(overview.totalOutputTokens), sub: Format.cost(overview.costBreakdown.outputCost))
-                    MetricCard(label: "Cache Read", value: Format.tokens(overview.totalCacheReadTokens), sub: Format.cost(overview.costBreakdown.cacheReadCost))
-                    MetricCard(label: "Cache Write", value: Format.tokens(overview.totalCacheWriteTokens), sub: Format.cost(overview.costBreakdown.cacheWriteCost))
-                }
+                metricCards
 
                 CostBreakdownBar(breakdown: overview.costBreakdown)
 
@@ -89,22 +220,60 @@ struct OverviewTab: View {
                         .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                 }
 
-                GroupBox("Top Projects by Cost") {
+                ContextComposition(overview: overview)
+
+                DailyCostChart(dailyCosts: overview.dailyCosts,
+                               hourlyCosts: overview.hourlyCosts,
+                               showHourly: showHourly)
+
+                RecommendationsView(sessions: sessions, overview: overview)
+
+                SavingsPotentialView(overview: overview, sessions: sessions)
+
+                GroupBox("Top Sessions by Cost") {
                     VStack(spacing: 0) {
-                        ForEach(overview.projectSummaries.prefix(10)) { p in
-                            HStack {
-                                Text(Format.path(p.project)).lineLimit(1).truncationMode(.middle)
-                                Spacer()
-                                Text("\(p.sessionCount) sessions").foregroundStyle(.secondary).font(.caption)
-                                Text(Format.cost(p.totalCostUsd)).monospacedDigit().bold().frame(width: 90, alignment: .trailing)
+                        ForEach(overview.topSessions) { s in
+                            NavigationLink(value: s) {
+                                HStack {
+                                    Text(Format.path(s.project)).lineLimit(1).truncationMode(.middle)
+                                        .frame(width: 200, alignment: .leading)
+                                    Text(s.title ?? "—").lineLimit(1).foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    sourceBadge(s.source)
+                                    Text(Format.percent(s.cacheHitRate)).monospacedDigit()
+                                        .foregroundStyle(.secondary).frame(width: 60, alignment: .trailing)
+                                    Text(Format.cost(s.estimatedCostUsd)).monospacedDigit().bold()
+                                        .frame(width: 80, alignment: .trailing)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                }
+                                .font(.callout)
+                                .padding(.vertical, 5)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.vertical, 5)
+                            .buttonStyle(.plain)
                             Divider()
                         }
                     }
                 }
             }
             .padding(20)
+        }
+    }
+
+    private var metricCards: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
+            let totalMs = sessions.reduce(0.0) { $0 + Format.sessionDurationMs($1) }
+            MetricCard(label: "Total Cost", value: Format.cost(overview.totalCostUsd),
+                       sub: overview.totalSessions > 0 ? "\(Format.cost(overview.totalCostUsd / Double(overview.totalSessions))) avg/session" : nil)
+            MetricCard(label: "Sessions", value: String(overview.totalSessions),
+                       sub: totalMs > 0 ? "\(Format.duration(totalMs)) total" : nil)
+            MetricCard(label: "Cache Hit Rate", value: Format.percent(overview.avgCacheHitRate), sub: "higher is better")
+            MetricCard(label: "System Overhead", value: Format.tokens(overview.estimatedSystemOverheadTokens), sub: "median/session")
+            MetricCard(label: "Input", value: Format.tokens(overview.totalInputTokens), sub: Format.cost(overview.costBreakdown.inputCost))
+            MetricCard(label: "Output", value: Format.tokens(overview.totalOutputTokens), sub: Format.cost(overview.costBreakdown.outputCost))
+            MetricCard(label: "Cache Read", value: Format.tokens(overview.totalCacheReadTokens), sub: Format.cost(overview.costBreakdown.cacheReadCost))
+            MetricCard(label: "Cache Write", value: Format.tokens(overview.totalCacheWriteTokens), sub: Format.cost(overview.costBreakdown.cacheWriteCost))
         }
     }
 }
@@ -128,10 +297,10 @@ struct MetricCard: View {
 struct CostBreakdownBar: View {
     let breakdown: CostBreakdown
     private var segments: [(String, Double, Color)] {
-        [("Output", breakdown.outputCost, .blue),
-         ("Cache Write", breakdown.cacheWriteCost, .orange),
-         ("Input", breakdown.inputCost, .green),
-         ("Cache Read", breakdown.cacheReadCost, .teal)]
+        [("Output", breakdown.outputCost, CostColors.output),
+         ("Cache Write", breakdown.cacheWriteCost, CostColors.cacheWrite),
+         ("Input", breakdown.inputCost, CostColors.input),
+         ("Cache Read", breakdown.cacheReadCost, CostColors.cacheRead)]
     }
     var body: some View {
         let total = max(breakdown.totalCost, 0.0001)
@@ -149,7 +318,7 @@ struct CostBreakdownBar: View {
                     ForEach(segments, id: \.0) { seg in
                         HStack(spacing: 5) {
                             Circle().fill(seg.2).frame(width: 9, height: 9)
-                            Text("\(seg.0): \(Format.cost(seg.1))").font(.caption)
+                            Text("\(seg.0): \(Format.cost(seg.1)) (\(Format.percent(seg.1 / total)))").font(.caption)
                         }
                     }
                 }
@@ -159,53 +328,121 @@ struct CostBreakdownBar: View {
     }
 }
 
-// MARK: - Sessions / Projects
+// MARK: - Sessions
 
 struct SessionsTab: View {
     let sessions: [SessionSummary]
+    let onSelectSession: (SessionSummary) -> Void
+
     @State private var filter = ""
+    @State private var sortOrder = [KeyPathComparator(\SessionSummary.dateKey, order: .reverse)]
+    @State private var selection: SessionSummary.ID?
 
     private var filtered: [SessionSummary] {
-        guard !filter.isEmpty else { return sessions }
-        let q = filter.lowercased()
-        return sessions.filter {
-            $0.project.lowercased().contains(q) || ($0.title ?? "").lowercased().contains(q)
-                || $0.source.lowercased().contains(q) || ($0.gitBranch ?? "").lowercased().contains(q)
+        var result = sessions
+        if !filter.isEmpty {
+            let q = filter.lowercased()
+            result = result.filter {
+                $0.project.lowercased().contains(q) || ($0.title ?? "").lowercased().contains(q)
+                    || $0.source.lowercased().contains(q) || ($0.gitBranch ?? "").lowercased().contains(q)
+            }
         }
+        return result.sorted(using: sortOrder)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                TextField("Filter by project, branch, title, or source…", text: $filter)
-                    .textFieldStyle(.roundedBorder).frame(maxWidth: 400)
-                Text("\(filtered.count) sessions").foregroundStyle(.secondary).font(.caption)
-                Spacer()
-            }.padding(12)
-            Table(filtered) {
-                TableColumn("Project") { Text(Format.path($0.project)).lineLimit(1).truncationMode(.middle) }
-                TableColumn("Title") { Text($0.title ?? "—").lineLimit(1) }
-                TableColumn("Cost") { Text(Format.cost($0.estimatedCostUsd)).monospacedDigit() }
-                TableColumn("Cache Hit") { Text(Format.percent($0.cacheHitRate)).monospacedDigit() }
-                TableColumn("Input") { Text(Format.tokens($0.totalInputTokens)).monospacedDigit() }
-                TableColumn("Output") { Text(Format.tokens($0.totalOutputTokens)).monospacedDigit() }
-                TableColumn("Msgs") { Text(String($0.messageCount)).monospacedDigit() }
-                TableColumn("Source") { Text($0.source) }
+        Table(filtered, selection: $selection, sortOrder: $sortOrder) {
+            Group {
+                TableColumn("Project", value: \SessionSummary.project) {
+                    Text(Format.path($0.project)).lineLimit(1).truncationMode(.middle)
+                }
+                .width(min: 140, ideal: 200)
+                TableColumn("Title", value: \SessionSummary.titleText) { Text($0.title ?? "—").lineLimit(1) }
+                    .width(min: 120, ideal: 240)
+                TableColumn("Branch", value: \SessionSummary.branchText) { Text($0.gitBranch ?? "—").lineLimit(1) }
+                    .width(min: 70, ideal: 110)
+                TableColumn("Msgs", value: \SessionSummary.messageCount) { Text(String($0.messageCount)).monospacedDigit() }
+                    .width(48)
+                TableColumn("Duration", value: \SessionSummary.durationMs) { Text(Format.duration($0.durationMs)).monospacedDigit() }
+                    .width(70)
+                TableColumn("Cost", value: \SessionSummary.estimatedCostUsd) {
+                    Text(Format.cost($0.estimatedCostUsd)).monospacedDigit().bold()
+                }
+                .width(70)
+                TableColumn("Cache Hit", value: \SessionSummary.cacheHitRate) { Text(Format.percent($0.cacheHitRate)).monospacedDigit() }
+                    .width(66)
             }
+            Group {
+                TableColumn("Input", value: \SessionSummary.totalInputTokens) { Text(Format.tokens($0.totalInputTokens)).monospacedDigit() }
+                    .width(60)
+                TableColumn("Output", value: \SessionSummary.totalOutputTokens) { Text(Format.tokens($0.totalOutputTokens)).monospacedDigit() }
+                    .width(60)
+                TableColumn("Cache W", value: \SessionSummary.totalCacheWriteTokens) { Text(Format.tokens($0.totalCacheWriteTokens)).monospacedDigit() }
+                    .width(64)
+                TableColumn("Cache R", value: \SessionSummary.totalCacheReadTokens) { Text(Format.tokens($0.totalCacheReadTokens)).monospacedDigit() }
+                    .width(64)
+                TableColumn("Subagents") { s in
+                    Text(s.subagentCount > 0 ? "\(s.subagentCount) (\(Format.cost(s.subagentCostUsd)))" : "—")
+                        .monospacedDigit()
+                }
+                .width(80)
+                TableColumn("Source") { s in
+                    HStack(spacing: 5) {
+                        sourceBadge(s.source)
+                        if let model = displayModel(s.model) {
+                            Text(model).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                }
+                .width(min: 90, ideal: 150)
+                TableColumn("Date", value: \SessionSummary.dateKey) { s in
+                    Text(Format.parseDate(s.firstTimestamp).map {
+                        $0.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+                    } ?? "—")
+                }
+                .width(110)
+            }
+        }
+        .searchable(text: $filter, placement: .toolbar,
+                    prompt: "Project, branch, title, or source")
+        .onChange(of: selection) { _, newValue in
+            guard let id = newValue,
+                  let session = sessions.first(where: { $0.sessionId == id }) else { return }
+            selection = nil
+            onSelectSession(session)
         }
     }
 }
 
+// MARK: - Projects
+
 struct ProjectsTab: View {
     let projects: [ProjectSummary]
+    let onSelectProject: (String) -> Void
+
+    @State private var sortOrder = [KeyPathComparator(\ProjectSummary.totalCostUsd, order: .reverse)]
+    @State private var selection: ProjectSummary.ID?
+
     var body: some View {
-        Table(projects) {
-            TableColumn("Project") { Text(Format.path($0.project)).lineLimit(1).truncationMode(.middle) }
-            TableColumn("Sessions") { Text(String($0.sessionCount)).monospacedDigit() }
-            TableColumn("Total Cost") { Text(Format.cost($0.totalCostUsd)).monospacedDigit() }
-            TableColumn("Cache Hit") { Text(Format.percent($0.avgCacheHitRate)).monospacedDigit() }
-            TableColumn("Input") { Text(Format.tokens($0.totalInputTokens)).monospacedDigit() }
-            TableColumn("Output") { Text(Format.tokens($0.totalOutputTokens)).monospacedDigit() }
+        Table(projects.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Project", value: \ProjectSummary.project) {
+                Text(Format.path($0.project)).lineLimit(1).truncationMode(.middle)
+            }
+            .width(min: 200, ideal: 340)
+            TableColumn("Sessions", value: \ProjectSummary.sessionCount) { Text(String($0.sessionCount)).monospacedDigit() }
+            TableColumn("Total Cost", value: \ProjectSummary.totalCostUsd) {
+                Text(Format.cost($0.totalCostUsd)).monospacedDigit().bold()
+            }
+            TableColumn("Cache Hit", value: \ProjectSummary.avgCacheHitRate) { Text(Format.percent($0.avgCacheHitRate)).monospacedDigit() }
+            TableColumn("Input", value: \ProjectSummary.totalInputTokens) { Text(Format.tokens($0.totalInputTokens)).monospacedDigit() }
+            TableColumn("Output", value: \ProjectSummary.totalOutputTokens) { Text(Format.tokens($0.totalOutputTokens)).monospacedDigit() }
+            TableColumn("Cache W", value: \ProjectSummary.totalCacheWriteTokens) { Text(Format.tokens($0.totalCacheWriteTokens)).monospacedDigit() }
+            TableColumn("Cache R", value: \ProjectSummary.totalCacheReadTokens) { Text(Format.tokens($0.totalCacheReadTokens)).monospacedDigit() }
+        }
+        .onChange(of: selection) { _, newValue in
+            guard let project = newValue else { return }
+            selection = nil
+            onSelectProject(project)
         }
     }
 }
