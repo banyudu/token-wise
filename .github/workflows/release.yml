@@ -25,16 +25,10 @@ permissions:
 jobs:
   release:
     runs-on: [self-hosted, macOS]
-    env:
-      GH_TOKEN: ${{ github.token }} # used by gh in scripts/release-dev.sh
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install frontend dependencies
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-
+      # Native Swift pipeline (apple/) — no Node/Rust toolchain needed.
       - name: Build & upload
         env:
           CHANNEL: ${{ inputs.channel }}

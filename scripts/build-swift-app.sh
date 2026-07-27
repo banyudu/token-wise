@@ -39,18 +39,29 @@ cp apple/.build/release/TokenWiseApp "$APP/Contents/MacOS/TokenWiseApp"
 cp apple/.build/release/token-wise "$APP/Contents/MacOS/token-wise"
 cp src-tauri/icons/icon.icns "$APP/Contents/Resources/icon.icns"
 
+# Mac App Store builds must embed the distribution provisioning profile
+# (pairs with the application-identifier entitlement).
+if [[ "$CHANNEL" == "appstore" ]]; then
+  cp src-tauri/embedded.provisionprofile "$APP/Contents/embedded.provisionprofile"
+fi
+
 IDENTITY="${APPLE_SIGNING_IDENTITY:-}"
 if [[ "$CHANNEL" == "appstore" && -z "$IDENTITY" ]]; then
   echo "appstore channel requires APPLE_SIGNING_IDENTITY" >&2
   exit 1
 fi
 
+# Hardened runtime is for Developer ID + notarization; App Store builds rely
+# on the App Sandbox instead.
+RUNTIME_OPTS=(--options runtime)
+[[ "$CHANNEL" == "appstore" ]] && RUNTIME_OPTS=()
+
 if [[ -n "$IDENTITY" ]]; then
   echo "==> codesign ($IDENTITY)"
-  codesign --force --options runtime --timestamp \
+  codesign --force "${RUNTIME_OPTS[@]}" --timestamp \
     --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" \
     "$APP/Contents/MacOS/token-wise"
-  codesign --force --options runtime --timestamp \
+  codesign --force "${RUNTIME_OPTS[@]}" --timestamp \
     --entitlements "$ENTITLEMENTS" --sign "$IDENTITY" \
     "$APP"
 else

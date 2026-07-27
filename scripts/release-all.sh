@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build + upload both distribution channels in one shot:
+# Build + upload both distribution channels of the native Swift app (apple/):
 #   - App Store  (Apple Distribution, sandboxed, .pkg -> altool)
-#   - Dev        (Developer ID, notarized DMG + updater feed -> GitHub Releases)
+#   - Dev        (Developer ID, notarized DMG -> S3 / assets.banyudu.com)
 #
 # Secrets/env come from the Keychain via scripts/load-release-env.sh.
 #
@@ -11,7 +11,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-export PATH="$HOME/.cargo/bin:$PATH"
 
 # shellcheck source=scripts/load-release-env.sh
 source scripts/load-release-env.sh
@@ -24,18 +23,19 @@ esac
 
 if [[ "$CHANNEL" == "both" || "$CHANNEL" == "appstore" ]]; then
   echo "==> App Store channel (Apple Distribution, sandboxed)"
-  # App Store apps are NOT notarized — strip the notarization creds so the
-  # bundler doesn't try (and fail) to notarize an Apple-Distribution build.
-  env -u APPLE_API_KEY -u APPLE_API_KEY_PATH -u APPLE_API_ISSUER \
-      -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID \
-      pnpm tauri:build:appstore
-  pnpm tauri:pkg:appstore
-  pnpm tauri:upload:appstore
+  APPLE_SIGNING_IDENTITY="${APPSTORE_SIGNING_IDENTITY:-Apple Distribution: Yudu Ban (RYLS8UDY5D)}" \
+    scripts/build-swift-app.sh appstore
+  xcrun productbuild --sign "${MAC_INSTALLER_IDENTITY:?}" \
+    --component dist-swift/token-wise.app /Applications token-wise.pkg
+  xcrun altool --upload-app --type macos --file token-wise.pkg \
+    --apiKey "${APPLE_API_KEY_ID:?}" --apiIssuer "${APPLE_API_ISSUER:?}" --use-old-altool
 fi
 
 if [[ "$CHANNEL" == "both" || "$CHANNEL" == "dev" ]]; then
-  echo "==> Dev channel (Developer ID, notarized, auto-update)"
-  pnpm tauri:release:dev
+  echo "==> Dev channel (Developer ID, notarized DMG)"
+  APPLE_SIGNING_IDENTITY="${DEV_SIGNING_IDENTITY:-Developer ID Application: Yudu Ban (RYLS8UDY5D)}" \
+    scripts/build-swift-app.sh dev
+  scripts/release-swift-dev.sh
 fi
 
 echo "Release complete: ${CHANNEL}"

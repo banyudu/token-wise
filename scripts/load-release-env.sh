@@ -19,12 +19,12 @@ _p8_id="$(basename "$APPLE_API_KEY_PATH")"; _p8_id="${_p8_id#AuthKey_}"; _p8_id=
 : "${APPLE_API_ISSUER:=$(_kc APPLE_API_ISSUER)}"
 export APPLE_API_KEY_PATH APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
 
-# --- Dev channel updater signing --------------------------------------------
+# --- Legacy Tauri updater signing (optional; only for old Tauri releases) ---
 : "${TAURI_SIGNING_PRIVATE_KEY_FILE:=$HOME/.tauri/token-wise.key}"
 if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" && -f "$TAURI_SIGNING_PRIVATE_KEY_FILE" ]]; then
   TAURI_SIGNING_PRIVATE_KEY="$(cat "$TAURI_SIGNING_PRIVATE_KEY_FILE")"
 fi
-: "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:=$(_kc TAURI_SIGNING_PRIVATE_KEY_PASSWORD)}"
+: "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:=$(_kc TAURI_SIGNING_PRIVATE_KEY_PASSWORD || true)}"
 export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 
 # --- App Store installer identity (not secret) ------------------------------
@@ -32,11 +32,11 @@ export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 export MAC_INSTALLER_IDENTITY
 
 # --- Validation -------------------------------------------------------------
+# The Swift release pipeline only needs the App Store Connect API key
+# (notarization + altool upload). The Tauri updater key above is legacy.
 _missing=()
 [[ -f "$APPLE_API_KEY_PATH" ]] || _missing+=("APPLE_API_KEY_PATH ($APPLE_API_KEY_PATH not found)")
 [[ -n "$APPLE_API_ISSUER" ]]   || _missing+=("APPLE_API_ISSUER (run scripts/setup-release-secrets.sh)")
-[[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]] || _missing+=("TAURI_SIGNING_PRIVATE_KEY ($TAURI_SIGNING_PRIVATE_KEY_FILE not found — run 'pnpm tauri signer generate -w $TAURI_SIGNING_PRIVATE_KEY_FILE')")
-[[ -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]] || _missing+=("TAURI_SIGNING_PRIVATE_KEY_PASSWORD (run scripts/setup-release-secrets.sh)")
 
 if (( ${#_missing[@]} > 0 )); then
   echo "Missing release configuration:" >&2
