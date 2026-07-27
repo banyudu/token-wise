@@ -59,6 +59,7 @@ public enum ClaudeParser {
         var usedFallback = false
         var seenUsageKeys = Set<String>()
         var dailyCost: [String: Double] = [:]
+        var dailyTokens: [String: UInt64] = [:]
 
         for msg in messages {
             let inner = msg.message
@@ -81,6 +82,7 @@ public enum ClaudeParser {
                 breakdown.add(cost)
                 if let day = Format.localDay(msg.timestamp) {
                     dailyCost[day, default: 0] += cost.totalCost
+                    dailyTokens[day, default: 0] += input + output + cw + cr
                 }
             }
             if let m = msgModel { model = m }
@@ -108,7 +110,7 @@ public enum ClaudeParser {
             firstTurnCacheWrite: firstTurnCacheWrite, subagentCount: subagentCount,
             subagentCostUsd: subagentCost, source: "claude", model: model,
             pricedByFallback: usedFallback, ephemeral5mTokens: eph5m, ephemeral1hTokens: eph1h,
-            dailyCostUsd: dailyCost
+            dailyCostUsd: dailyCost, dailyTokens: dailyTokens
         )
     }
 
@@ -149,7 +151,7 @@ public enum ClaudeParser {
         // Per-file disk cache: only re-parse sessions whose file changed. The
         // first run is cold (~seconds for thousands of files); every run after
         // reuses unchanged summaries, so `token-wise today` is near-instant.
-        let disk = force ? [:] : DiskCache.load("claude-sessions-v3")
+        let disk = force ? [:] : DiskCache.load("claude-sessions-v4")
         var fresh = [DiskCache.Entry?](repeating: nil, count: files.count)
         fresh.withUnsafeMutableBufferPointer { buffer in
             DispatchQueue.concurrentPerform(iterations: files.count) { i in
@@ -171,7 +173,7 @@ public enum ClaudeParser {
             sessions.append(entry.summary)
         }
         sessions.sort { ($0.lastTimestamp ?? "") > ($1.lastTimestamp ?? "") }
-        DiskCache.save("claude-sessions-v3", byPath)
+        DiskCache.save("claude-sessions-v4", byPath)
         cache.set(signature: signature, sessions: sessions)
         return sessions
     }
@@ -187,6 +189,7 @@ public enum ClaudeParser {
         var subagentCost = 0.0
         var subagentCount: UInt32 = 0
         var subagentDaily: [String: Double] = [:]
+        var subagentDailyTokens: [String: UInt64] = [:]
         let subDir = url.deletingPathExtension().appendingPathComponent("subagents")
         if let subFiles = try? FileManager.default.contentsOfDirectory(at: subDir, includingPropertiesForKeys: nil) {
             for sub in subFiles where sub.pathExtension == "jsonl" {
@@ -194,6 +197,7 @@ public enum ClaudeParser {
                     subagentCost += s.estimatedCostUsd
                     subagentCount += 1
                     for (day, cost) in s.dailyCostUsd ?? [:] { subagentDaily[day, default: 0] += cost }
+                    for (day, tok) in s.dailyTokens ?? [:] { subagentDailyTokens[day, default: 0] += tok }
                 }
             }
         }
@@ -205,11 +209,14 @@ public enum ClaudeParser {
             let dir = url.deletingLastPathComponent().lastPathComponent
             summary.project = Paths.normalizeProjectPath(Paths.decodeProjectName(dir))
         }
-        // Fold subagent spend into the per-day map so daily totals include it.
+        // Fold subagent spend into the per-day maps so daily totals include it.
         if !subagentDaily.isEmpty {
             var daily = summary.dailyCostUsd ?? [:]
             for (day, cost) in subagentDaily { daily[day, default: 0] += cost }
             summary.dailyCostUsd = daily
+            var tokens = summary.dailyTokens ?? [:]
+            for (day, tok) in subagentDailyTokens { tokens[day, default: 0] += tok }
+            summary.dailyTokens = tokens
         }
         return summary
     }
@@ -231,6 +238,7 @@ public enum ClaudeParser {
         var sawFirstUsage = false, usedFallback = false, any = false
         var seenUsageKeys = Set<String>()
         var dailyCost: [String: Double] = [:]
+        var dailyTokens: [String: UInt64] = [:]
 
         text.enumerateLines { line, _ in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -255,6 +263,7 @@ public enum ClaudeParser {
                 breakdown.add(cost)
                 if let day = Format.localDay(msg.timestamp) {
                     dailyCost[day, default: 0] += cost.totalCost
+                    dailyTokens[day, default: 0] += input + output + cw + cr
                 }
             }
             if let m = inner?.model { model = m }
@@ -283,7 +292,7 @@ public enum ClaudeParser {
             firstTurnCacheWrite: firstTurnCacheWrite, subagentCount: subagentCount,
             subagentCostUsd: subagentCost, source: "claude", model: model,
             pricedByFallback: usedFallback, ephemeral5mTokens: eph5m, ephemeral1hTokens: eph1h,
-            dailyCostUsd: dailyCost
+            dailyCostUsd: dailyCost, dailyTokens: dailyTokens
         )
     }
 

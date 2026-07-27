@@ -12,6 +12,12 @@ public enum Format {
         String(format: "$%.2f", n)
     }
 
+    /// Menu-bar-compact cost: "$548.1", "$2.2k" — one decimal, k above 1000.
+    public static func compactCost(_ n: Double) -> String {
+        if n >= 1_000 { return String(format: "$%.1fk", n / 1_000) }
+        return String(format: "$%.1f", n)
+    }
+
     public static func percent(_ n: Double) -> String {
         String(format: "%.1f%%", n * 100)
     }

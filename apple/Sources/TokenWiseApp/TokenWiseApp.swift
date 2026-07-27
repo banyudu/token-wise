@@ -24,15 +24,48 @@ struct TokenWiseApp: App {
             MenuBarView()
                 .environmentObject(model)
         } label: {
-            // Live today's-cost readout in the system menu bar. Icon + amount
-            // only — a "TW" prefix reads like a region/currency code.
-            HStack(spacing: 3) {
-                Image(systemName: "chart.bar.fill")
-                Text(model.loading && model.allSessions.isEmpty ? "…" : Format.cost(model.todayCost))
-            }
+            // Two-row readout: today's cost (green) over today's tokens.
+            // Rendered as a non-template NSImage because the menu bar forces
+            // template (monochrome) rendering on plain Text.
+            Image(nsImage: model.loading && model.allSessions.isEmpty
+                ? menuBarStatusImage(cost: "…", tokens: nil)
+                : menuBarStatusImage(cost: Format.compactCost(model.todayCost),
+                                     tokens: Format.tokens(model.todayTokens)))
         }
         .menuBarExtraStyle(.window)
     }
+}
+
+/// Render the status as a colored, non-template image — the menu bar strips
+/// color from plain SwiftUI Text (template rendering), so draw it ourselves.
+/// Two rows: cost (green) on top, tokens (secondary) below.
+func menuBarStatusImage(cost: String, tokens: String?) -> NSImage {
+    let costLine = NSAttributedString(string: cost, attributes: [
+        .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
+        .foregroundColor: NSColor.systemGreen,
+    ])
+    let tokenLine = tokens.map {
+        NSAttributedString(string: $0, attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ])
+    }
+
+    let costSize = costLine.size()
+    let tokenSize = tokenLine?.size() ?? .zero
+    let width = ceil(max(costSize.width, tokenSize.width))
+    let height = ceil(costSize.height + tokenSize.height)
+
+    let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
+        // Bottom-left origin: token row at the bottom, cost row above it.
+        if let tokenLine {
+            tokenLine.draw(at: NSPoint(x: (width - tokenSize.width) / 2, y: 0))
+        }
+        costLine.draw(at: NSPoint(x: (width - costSize.width) / 2, y: tokenSize.height))
+        return true
+    }
+    image.isTemplate = false
+    return image
 }
 
 /// Bring the main window to front. SwiftUI's `openWindow` is unreliable from

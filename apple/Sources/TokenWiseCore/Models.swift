@@ -103,6 +103,8 @@ public struct SessionSummary: Codable, Identifiable, Hashable {
     /// dump their whole cost on the day they ended. Nil for sources without
     /// per-response data (Codex).
     public var dailyCostUsd: [String: Double]? = nil
+    /// Tokens (input + output + cache read + cache write) per local day.
+    public var dailyTokens: [String: UInt64]? = nil
 
     public var id: String { sessionId }
 }

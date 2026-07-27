@@ -27,6 +27,13 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(Format.tokens(2_500_000), "2.5M")
     }
 
+    func testCompactCost() {
+        XCTAssertEqual(Format.compactCost(548.12), "$548.1")
+        XCTAssertEqual(Format.compactCost(2212), "$2.2k")
+        XCTAssertEqual(Format.compactCost(3.25), "$3.2")
+        XCTAssertEqual(Format.compactCost(0), "$0.0")
+    }
+
     func testFormatDuration() {
         XCTAssertEqual(Format.duration(0), "—")
         XCTAssertEqual(Format.duration(30_000), "<1m")

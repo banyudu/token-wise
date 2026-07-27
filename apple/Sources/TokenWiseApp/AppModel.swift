@@ -154,6 +154,18 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Tokens processed today (input + output + cache read/write), same
+    /// attribution rules as `todayCost`.
+    var todayTokens: UInt64 {
+        let today = Format.localDay(of: Date())
+        return allSessions.reduce(UInt64(0)) { sum, s in
+            if let daily = s.dailyTokens { return sum + (daily[today] ?? 0) }
+            guard Format.localDay(s.lastTimestamp) == today else { return sum }
+            return sum + s.totalInputTokens + s.totalOutputTokens
+                + s.totalCacheReadTokens + s.totalCacheWriteTokens
+        }
+    }
+
     var totalCost: Double { allSessions.reduce(0.0) { $0 + $1.estimatedCostUsd } }
 
     func runAnalysis(engine: AIEngine?) {
