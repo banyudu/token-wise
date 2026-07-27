@@ -17,6 +17,7 @@ public struct TokenUsage: Decodable {
 }
 
 public struct ClaudeMessageInner: Decodable {
+    public var id: String?
     public var usage: TokenUsage?
     public var role: String?
     public var content: JSONValue?
@@ -30,6 +31,12 @@ public struct ClaudeMessage: Decodable {
     public var cwd: String?
     public var sessionId: String?
     public var gitBranch: String?
+    public var requestId: String?
+
+    /// Streaming writes one JSONL line per content block, each repeating the
+    /// SAME API response usage. This key identifies the underlying response so
+    /// usage is only counted once (nil = no id, count it).
+    public var usageDedupeKey: String? { message?.id ?? requestId }
 }
 
 // MARK: - Output types
@@ -91,6 +98,11 @@ public struct SessionSummary: Codable, Identifiable, Hashable {
     public var pricedByFallback: Bool
     public var ephemeral5mTokens: UInt64
     public var ephemeral1hTokens: UInt64
+    /// Cost attributed to each local-timezone day ("yyyy-MM-dd") the session
+    /// actually ran, from per-response timestamps. Long sessions no longer
+    /// dump their whole cost on the day they ended. Nil for sources without
+    /// per-response data (Codex).
+    public var dailyCostUsd: [String: Double]? = nil
 
     public var id: String { sessionId }
 }

@@ -59,6 +59,38 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(s.estimatedCostUsd, 0.0003 + 0.00375 + 0.0015 + 0.0009, accuracy: 1e-9)
     }
 
+    func testDuplicateUsageLinesCountedOnce() {
+        // Streaming writes one line per content block, all carrying the SAME
+        // message id + usage. Only the first may count.
+        let usage = #""usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":1000,"cache_read_input_tokens":2000}"#
+        let dup = #"{"type":"assistant","timestamp":"2026-01-01T00:00:00.000Z","requestId":"req_1","message":{"id":"msg_A","role":"assistant","model":"claude-sonnet-4-6",\#(usage)}}"#
+        let other = #"{"type":"assistant","timestamp":"2026-01-01T00:01:00.000Z","requestId":"req_2","message":{"id":"msg_B","role":"assistant","model":"claude-sonnet-4-6",\#(usage)}}"#
+        let decoder = JSONDecoder()
+        let messages = [dup, dup, dup, other].compactMap { try? decoder.decode(ClaudeMessage.self, from: Data($0.utf8)) }
+        XCTAssertEqual(messages.count, 4)
+        let s = ClaudeParser.summarize(sessionId: "t", messages: messages, pricing: PricingTable(), subagentCost: 0, subagentCount: 0)
+        XCTAssertEqual(s.totalInputTokens, 200)      // 2 unique responses, not 4 lines
+        XCTAssertEqual(s.totalOutputTokens, 100)
+        XCTAssertEqual(s.totalCacheWriteTokens, 2000)
+        XCTAssertEqual(s.totalCacheReadTokens, 4000)
+    }
+
+    func testDailyCostAttributionSplitsAcrossDays() {
+        let mk = { (ts: String, id: String) in
+            #"{"type":"assistant","timestamp":"\#(ts)","message":{"id":"\#(id)","role":"assistant","model":"claude-sonnet-4-6","usage":{"input_tokens":1000000,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#
+        }
+        // Noon UTC two days apart — distinct local days in any timezone.
+        let decoder = JSONDecoder()
+        let messages = [mk("2026-01-01T12:00:00.000Z", "m1"), mk("2026-01-03T12:00:00.000Z", "m2")]
+            .compactMap { try? decoder.decode(ClaudeMessage.self, from: Data($0.utf8)) }
+        let s = ClaudeParser.summarize(sessionId: "t", messages: messages, pricing: PricingTable(), subagentCost: 0, subagentCount: 0)
+        let daily = s.dailyCostUsd ?? [:]
+        XCTAssertEqual(daily.count, 2)
+        // 1M input at Sonnet $3/MTok per day.
+        for (_, cost) in daily { XCTAssertEqual(cost, 3.0, accuracy: 1e-9) }
+        XCTAssertEqual(daily.values.reduce(0, +), s.estimatedCostUsd, accuracy: 1e-9)
+    }
+
     func testAIPromptContainsSections() {
         let overview = OverviewMetrics(
             totalSessions: 1, totalCostUsd: 1, totalInputTokens: 1, totalOutputTokens: 1,

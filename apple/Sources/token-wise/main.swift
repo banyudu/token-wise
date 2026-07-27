@@ -51,17 +51,34 @@ case "total":
     }
 
 case "today":
-    let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM-dd"; fmt.timeZone = .current
-    let today = fmt.string(from: Date())
-    let todays = sessions.filter { iso8601ToLocalDay($0.lastTimestamp) == today }
-    let total = todays.reduce(0.0) { $0 + $1.estimatedCostUsd }
+    let today = Format.localDay(of: Date())
+    // Per-day attribution: only spend whose responses actually landed today.
+    // Sessions without the map (Codex) fall back to last-activity attribution.
+    var total = 0.0
+    var bySource: [String: Double] = [:]
+    var todays: [SessionSummary] = []
+    for s in sessions {
+        if let daily = s.dailyCostUsd {
+            if let cost = daily[today], cost > 0 {
+                total += cost; bySource[s.source, default: 0] += cost; todays.append(s)
+            }
+        } else if iso8601ToLocalDay(s.lastTimestamp) == today {
+            total += s.estimatedCostUsd
+            bySource[s.source, default: 0] += s.estimatedCostUsd
+            todays.append(s)
+        }
+    }
     let read = todays.reduce(UInt64(0)) { $0 + $1.totalCacheReadTokens }
     let ctx = todays.reduce(UInt64(0)) { $0 + $1.totalInputTokens + $1.totalCacheReadTokens + $1.totalCacheWriteTokens }
     let hit = ctx > 0 ? Double(read) / Double(ctx) : 0
     if flag("--json") {
-        printJSON(["date": today, "total_cost_usd": total, "session_count": todays.count, "cache_hit_rate": hit])
+        printJSON(["date": today, "total_cost_usd": total, "session_count": todays.count,
+                   "cache_hit_rate": hit, "by_source": bySource])
     } else {
         print("Today:  \(Format.cost(total)) (\(todays.count) sessions)")
+        for (source, cost) in bySource.sorted(by: { $0.value > $1.value }) {
+            print("        \(source): \(Format.cost(cost))")
+        }
         if !todays.isEmpty { print("        Cache hit rate: \(Format.percent(hit))") }
     }
 

@@ -24,8 +24,12 @@ struct TokenWiseApp: App {
             MenuBarView()
                 .environmentObject(model)
         } label: {
-            // Live today's-cost readout in the system menu bar.
-            Text(model.loading ? "TW …" : "TW \(Format.cost(model.todayCost))")
+            // Live today's-cost readout in the system menu bar. Icon + amount
+            // only — a "TW" prefix reads like a region/currency code.
+            HStack(spacing: 3) {
+                Image(systemName: "chart.bar.fill")
+                Text(model.loading && model.allSessions.isEmpty ? "…" : Format.cost(model.todayCost))
+            }
         }
         .menuBarExtraStyle(.window)
     }

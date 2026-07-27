@@ -5,6 +5,7 @@ import Foundation
 // sessions. `content` is decoded (via TitleProbe) only for the first user
 // message, to pull a title.
 struct LiteInner: Decodable {
+    var id: String?
     var usage: TokenUsage?
     var role: String?
     var model: String?
@@ -16,6 +17,10 @@ struct LiteMessage: Decodable {
     var cwd: String?
     var sessionId: String?
     var gitBranch: String?
+    var requestId: String?
+
+    /// See `ClaudeMessage.usageDedupeKey`.
+    var usageDedupeKey: String? { message?.id ?? requestId }
 }
 struct TitleProbe: Decodable {
     struct Inner: Decodable { var content: JSONValue? }
@@ -52,11 +57,13 @@ public enum ClaudeParser {
         var firstTurnCacheWrite: UInt64 = 0
         var sawFirstUsage = false
         var usedFallback = false
+        var seenUsageKeys = Set<String>()
+        var dailyCost: [String: Double] = [:]
 
         for msg in messages {
             let inner = msg.message
             let msgModel = inner?.model
-            if let usage = inner?.usage {
+            if let usage = inner?.usage, dedupeUsage(msg.usageDedupeKey, &seenUsageKeys) {
                 let input = usage.input_tokens ?? 0
                 let output = usage.output_tokens ?? 0
                 let cw = usage.cache_creation_input_tokens ?? 0
@@ -68,7 +75,13 @@ public enum ClaudeParser {
                 if !sawFirstUsage { firstTurnCacheWrite = cw; sawFirstUsage = true }
                 let resolution = pricing.resolve(msgModel ?? "")
                 if resolution.usedFallback { usedFallback = true }
-                breakdown.add(resolution.info.cost(input: input, cacheWrite: cw, cacheRead: cr, output: output))
+                let cost = resolution.info.cost(input: input, cacheWrite: cw, cacheRead: cr, output: output,
+                                                 eph5m: usage.cache_creation?.ephemeral_5m_input_tokens ?? 0,
+                                                 eph1h: usage.cache_creation?.ephemeral_1h_input_tokens ?? 0)
+                breakdown.add(cost)
+                if let day = Format.localDay(msg.timestamp) {
+                    dailyCost[day, default: 0] += cost.totalCost
+                }
             }
             if let m = msgModel { model = m }
             if msg.type == "user" || msg.type == "assistant" { msgCount += 1 }
@@ -94,8 +107,16 @@ public enum ClaudeParser {
             costBreakdown: breakdown, firstTimestamp: firstTs, lastTimestamp: lastTs,
             firstTurnCacheWrite: firstTurnCacheWrite, subagentCount: subagentCount,
             subagentCostUsd: subagentCost, source: "claude", model: model,
-            pricedByFallback: usedFallback, ephemeral5mTokens: eph5m, ephemeral1hTokens: eph1h
+            pricedByFallback: usedFallback, ephemeral5mTokens: eph5m, ephemeral1hTokens: eph1h,
+            dailyCostUsd: dailyCost
         )
+    }
+
+    /// True when this usage line should be counted: first sighting of its
+    /// response id. Lines without any id are always counted.
+    static func dedupeUsage(_ key: String?, _ seen: inout Set<String>) -> Bool {
+        guard let key else { return true }
+        return seen.insert(key).inserted
     }
 
     private static func extractTitle(_ content: JSONValue?) -> String? {
@@ -128,7 +149,7 @@ public enum ClaudeParser {
         // Per-file disk cache: only re-parse sessions whose file changed. The
         // first run is cold (~seconds for thousands of files); every run after
         // reuses unchanged summaries, so `token-wise today` is near-instant.
-        let disk = force ? [:] : DiskCache.load("claude-sessions")
+        let disk = force ? [:] : DiskCache.load("claude-sessions-v3")
         var fresh = [DiskCache.Entry?](repeating: nil, count: files.count)
         fresh.withUnsafeMutableBufferPointer { buffer in
             DispatchQueue.concurrentPerform(iterations: files.count) { i in
@@ -150,7 +171,7 @@ public enum ClaudeParser {
             sessions.append(entry.summary)
         }
         sessions.sort { ($0.lastTimestamp ?? "") > ($1.lastTimestamp ?? "") }
-        DiskCache.save("claude-sessions", byPath)
+        DiskCache.save("claude-sessions-v3", byPath)
         cache.set(signature: signature, sessions: sessions)
         return sessions
     }
@@ -165,12 +186,14 @@ public enum ClaudeParser {
 
         var subagentCost = 0.0
         var subagentCount: UInt32 = 0
+        var subagentDaily: [String: Double] = [:]
         let subDir = url.deletingPathExtension().appendingPathComponent("subagents")
         if let subFiles = try? FileManager.default.contentsOfDirectory(at: subDir, includingPropertiesForKeys: nil) {
             for sub in subFiles where sub.pathExtension == "jsonl" {
                 if let s = summarizeStreaming(sessionId: "", url: sub, pricing: pricing, subagentCost: 0, subagentCount: 0) {
                     subagentCost += s.estimatedCostUsd
                     subagentCount += 1
+                    for (day, cost) in s.dailyCostUsd ?? [:] { subagentDaily[day, default: 0] += cost }
                 }
             }
         }
@@ -181,6 +204,12 @@ public enum ClaudeParser {
         if summary.project.isEmpty {
             let dir = url.deletingLastPathComponent().lastPathComponent
             summary.project = Paths.normalizeProjectPath(Paths.decodeProjectName(dir))
+        }
+        // Fold subagent spend into the per-day map so daily totals include it.
+        if !subagentDaily.isEmpty {
+            var daily = summary.dailyCostUsd ?? [:]
+            for (day, cost) in subagentDaily { daily[day, default: 0] += cost }
+            summary.dailyCostUsd = daily
         }
         return summary
     }
@@ -200,6 +229,8 @@ public enum ClaudeParser {
         var breakdown = CostBreakdown()
         var firstTurnCacheWrite: UInt64 = 0
         var sawFirstUsage = false, usedFallback = false, any = false
+        var seenUsageKeys = Set<String>()
+        var dailyCost: [String: Double] = [:]
 
         text.enumerateLines { line, _ in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -208,7 +239,7 @@ public enum ClaudeParser {
                   let msg = try? decoder.decode(LiteMessage.self, from: data) else { return }
             any = true
             let inner = msg.message
-            if let usage = inner?.usage {
+            if let usage = inner?.usage, dedupeUsage(msg.usageDedupeKey, &seenUsageKeys) {
                 let input = usage.input_tokens ?? 0, output = usage.output_tokens ?? 0
                 let cw = usage.cache_creation_input_tokens ?? 0, cr = usage.cache_read_input_tokens ?? 0
                 totalInput += input; totalOutput += output
@@ -218,7 +249,13 @@ public enum ClaudeParser {
                 if !sawFirstUsage { firstTurnCacheWrite = cw; sawFirstUsage = true }
                 let res = pricing.resolve(inner?.model ?? "")
                 if res.usedFallback { usedFallback = true }
-                breakdown.add(res.info.cost(input: input, cacheWrite: cw, cacheRead: cr, output: output))
+                let cost = res.info.cost(input: input, cacheWrite: cw, cacheRead: cr, output: output,
+                                         eph5m: usage.cache_creation?.ephemeral_5m_input_tokens ?? 0,
+                                         eph1h: usage.cache_creation?.ephemeral_1h_input_tokens ?? 0)
+                breakdown.add(cost)
+                if let day = Format.localDay(msg.timestamp) {
+                    dailyCost[day, default: 0] += cost.totalCost
+                }
             }
             if let m = inner?.model { model = m }
             if msg.type == "user" || msg.type == "assistant" { msgCount += 1 }
@@ -245,7 +282,8 @@ public enum ClaudeParser {
             costBreakdown: breakdown, firstTimestamp: firstTs, lastTimestamp: lastTs,
             firstTurnCacheWrite: firstTurnCacheWrite, subagentCount: subagentCount,
             subagentCostUsd: subagentCost, source: "claude", model: model,
-            pricedByFallback: usedFallback, ephemeral5mTokens: eph5m, ephemeral1hTokens: eph1h
+            pricedByFallback: usedFallback, ephemeral5mTokens: eph5m, ephemeral1hTokens: eph1h,
+            dailyCostUsd: dailyCost
         )
     }
 
@@ -263,14 +301,19 @@ public enum ClaudeParser {
         var turns: [TurnMetrics] = []
         var turnIndex: UInt32 = 0
         var cumulative: UInt64 = 0
+        var seenTurnKeys = Set<String>()
         for msg in messages {
-            guard let usage = msg.message?.usage else { continue }
+            guard let usage = msg.message?.usage,
+                  dedupeUsage(msg.usageDedupeKey, &seenTurnKeys) else { continue }
             let input = usage.input_tokens ?? 0, output = usage.output_tokens ?? 0
             let cw = usage.cache_creation_input_tokens ?? 0, cr = usage.cache_read_input_tokens ?? 0
             cumulative += input + cw + cr
             let ctx = input + cw + cr
             let hit = ctx > 0 ? Double(cr) / Double(ctx) : 0
-            let cost = pricing.info(msg.message?.model ?? "").cost(input: input, cacheWrite: cw, cacheRead: cr, output: output)
+            let cost = pricing.info(msg.message?.model ?? "").cost(
+                input: input, cacheWrite: cw, cacheRead: cr, output: output,
+                eph5m: usage.cache_creation?.ephemeral_5m_input_tokens ?? 0,
+                eph1h: usage.cache_creation?.ephemeral_1h_input_tokens ?? 0)
             turns.append(TurnMetrics(turnIndex: turnIndex, role: msg.type ?? "", inputTokens: input,
                                      outputTokens: output, cacheWriteTokens: cw, cacheReadTokens: cr,
                                      cumulativeContext: cumulative, cacheHitRate: hit,

@@ -34,6 +34,22 @@ public enum Format {
         return max(0, last.timeIntervalSince(first) * 1000)
     }
 
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = .current
+        return f
+    }()
+
+    /// Local-timezone calendar day ("yyyy-MM-dd") for an ISO timestamp.
+    public static func localDay(_ iso: String?) -> String? {
+        parseDate(iso).map { dayFormatter.string(from: $0) }
+    }
+
+    public static func localDay(of date: Date) -> String {
+        dayFormatter.string(from: date)
+    }
+
     private static let iso: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

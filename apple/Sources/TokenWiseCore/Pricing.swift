@@ -17,11 +17,27 @@ public struct PricingInfo: Equatable {
     /// Sonnet-class rates — used when a model name is unrecognized.
     public static let fallback = PricingInfo(input: 3.0, cacheWrite: 3.75, cacheRead: 0.30, output: 15.0)
 
-    public func cost(input: UInt64, cacheWrite: UInt64, cacheRead: UInt64, output: UInt64) -> CostBreakdown {
+    /// Anthropic bills cache writes per TTL: 5-minute at 1.25× the input rate,
+    /// 1-hour at 2× (Claude Code defaults to 1h). When the usage carries the
+    /// ephemeral split, price each portion; tokens outside the split (or
+    /// providers without write billing) fall back to the flat rate.
+    public func cost(input: UInt64, cacheWrite: UInt64, cacheRead: UInt64, output: UInt64,
+                     eph5m: UInt64 = 0, eph1h: UInt64 = 0) -> CostBreakdown {
         let inputCost = Double(input) / 1_000_000.0 * inputPerMTok
-        let cacheWriteCost = Double(cacheWrite) / 1_000_000.0 * cacheWritePerMTok
         let cacheReadCost = Double(cacheRead) / 1_000_000.0 * cacheReadPerMTok
         let outputCost = Double(output) / 1_000_000.0 * outputPerMTok
+
+        let cacheWriteCost: Double
+        let split = eph5m + eph1h
+        if split > 0, split <= cacheWrite, cacheWritePerMTok > 0 {
+            let rest = cacheWrite - split
+            cacheWriteCost = (Double(eph5m) * 1.25 * inputPerMTok
+                + Double(eph1h) * 2.0 * inputPerMTok
+                + Double(rest) * cacheWritePerMTok) / 1_000_000.0
+        } else {
+            cacheWriteCost = Double(cacheWrite) / 1_000_000.0 * cacheWritePerMTok
+        }
+
         return CostBreakdown(
             inputCost: inputCost,
             outputCost: outputCost,
@@ -72,21 +88,26 @@ public final class PricingTable {
     // longest pattern wins, so `gpt-5-mini` beats `gpt-5` and dated suffixes
     // like `claude-sonnet-4-5-20250929` still resolve.
     private static let table: [(String, Double, Double, Double, Double)] = [
-        // Anthropic Claude — current + recent generations
-        ("claude-opus-4-8", 15.0, 18.75, 1.50, 75.0),
-        ("claude-opus-4-7", 15.0, 18.75, 1.50, 75.0),
-        ("claude-opus-4-6", 15.0, 18.75, 1.50, 75.0),
-        ("claude-opus-4-5", 15.0, 18.75, 1.50, 75.0),
+        // Anthropic Claude — Opus 4.5 (Nov 2025) cut Opus to $5/$25;
+        // later Opus generations keep that tier. cacheWrite here is the
+        // 5m rate (1.25× input); 1h writes are priced via the ephemeral
+        // split in `cost()`.
+        ("claude-opus-5", 5.0, 6.25, 0.50, 25.0),
+        ("claude-opus-4-8", 5.0, 6.25, 0.50, 25.0),
+        ("claude-opus-4-7", 5.0, 6.25, 0.50, 25.0),
+        ("claude-opus-4-6", 5.0, 6.25, 0.50, 25.0),
+        ("claude-opus-4-5", 5.0, 6.25, 0.50, 25.0),
+        ("opus-4-8", 5.0, 6.25, 0.50, 25.0),
+        ("opus-4-7", 5.0, 6.25, 0.50, 25.0),
+        ("opus-4-6", 5.0, 6.25, 0.50, 25.0),
+        ("opus-4-5", 5.0, 6.25, 0.50, 25.0),
+        // Older Opus (4.1 and earlier) stays at the legacy tier.
         ("claude-opus", 15.0, 18.75, 1.50, 75.0),
-        ("opus-4-8", 15.0, 18.75, 1.50, 75.0),
-        ("opus-4-7", 15.0, 18.75, 1.50, 75.0),
-        ("opus-4-6", 15.0, 18.75, 1.50, 75.0),
-        ("opus-4-5", 15.0, 18.75, 1.50, 75.0),
-        // Mythos-class (Fable 5 / Mythos 5) — priced at Opus tier
-        ("claude-fable-5", 15.0, 18.75, 1.50, 75.0),
-        ("claude-mythos-5", 15.0, 18.75, 1.50, 75.0),
-        ("fable-5", 15.0, 18.75, 1.50, 75.0),
-        ("mythos-5", 15.0, 18.75, 1.50, 75.0),
+        // Mythos-class (Fable 5 / Mythos 5) — $10/$50 tier
+        ("claude-fable-5", 10.0, 12.50, 1.00, 50.0),
+        ("claude-mythos-5", 10.0, 12.50, 1.00, 50.0),
+        ("fable-5", 10.0, 12.50, 1.00, 50.0),
+        ("mythos-5", 10.0, 12.50, 1.00, 50.0),
         ("claude-sonnet-5", 3.0, 3.75, 0.30, 15.0),
         ("claude-sonnet-4-6", 3.0, 3.75, 0.30, 15.0),
         ("claude-sonnet-4-5", 3.0, 3.75, 0.30, 15.0),

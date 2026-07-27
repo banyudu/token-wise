@@ -50,6 +50,18 @@ final class AppModel: ObservableObject {
     @Published var analysisError: String?
 
     private let pricing = PricingTable.load()
+    private var refreshTimer: Timer?
+
+    /// Keep the menu-bar readout fresh: re-scan every 5 minutes. Unchanged
+    /// files hit the per-file cache, so a periodic reload is cheap.
+    init() {
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.loading else { return }
+                self.load()
+            }
+        }
+    }
 
     var availableEngines: [AIEngine] { AIAnalyzer.availableEngines() }
 
@@ -130,13 +142,16 @@ final class AppModel: ObservableObject {
     }
 
     /// Today's total cost in the user's local timezone — drives the menu bar.
+    /// Uses the per-day attribution map (only spend that actually happened
+    /// today), falling back to whole-session attribution for sources without
+    /// per-response timestamps (Codex).
     var todayCost: Double {
-        let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM-dd"; fmt.timeZone = .current
-        let today = fmt.string(from: Date())
-        return allSessions.filter { s in
-            guard let d = Format.parseDate(s.lastTimestamp) else { return false }
-            return fmt.string(from: d) == today
-        }.reduce(0.0) { $0 + $1.estimatedCostUsd }
+        let today = Format.localDay(of: Date())
+        return allSessions.reduce(0.0) { sum, s in
+            if let daily = s.dailyCostUsd { return sum + (daily[today] ?? 0) }
+            guard Format.localDay(s.lastTimestamp) == today else { return sum }
+            return sum + s.estimatedCostUsd
+        }
     }
 
     var totalCost: Double { allSessions.reduce(0.0) { $0 + $1.estimatedCostUsd } }
