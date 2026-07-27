@@ -31,6 +31,25 @@ struct TokenWiseApp: App {
     }
 }
 
+/// Bring the main window to front. SwiftUI's `openWindow` is unreliable from
+/// the menu-bar panel's scene context (silently no-ops), but the `Window`
+/// scene's NSWindow persists after close (hidden, identifier "main") — so
+/// order it front directly and only fall back to `openWindow` when it truly
+/// doesn't exist yet.
+@MainActor
+func openMainWindow(_ openWindow: OpenWindowAction) {
+    func mainWindow() -> NSWindow? {
+        NSApp.windows.first { $0.identifier?.rawValue == "main" }
+    }
+    if mainWindow() == nil { openWindow(id: "main") }
+    NSApp.activate(ignoringOtherApps: true)
+    mainWindow()?.makeKeyAndOrderFront(nil)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        mainWindow()?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
 struct MenuBarView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
@@ -44,7 +63,7 @@ struct MenuBarView: View {
             row("Sessions", Double(model.allSessions.count), isCount: true)
             Divider()
             HStack {
-                Button("Open") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
+                Button("Open") { openMainWindow(openWindow) }
                 Button(model.loading ? "Loading…" : "Refresh") { model.load(force: true) }
                     .disabled(model.loading)
                 Spacer()
