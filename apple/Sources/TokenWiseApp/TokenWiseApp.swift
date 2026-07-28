@@ -73,17 +73,58 @@ func menuBarStatusImage(cost: String, tokens: String?) -> NSImage {
 /// scene's NSWindow persists after close (hidden, identifier "main") — so
 /// order it front directly and only fall back to `openWindow` when it truly
 /// doesn't exist yet.
+///
+/// Extra care for real-world setups:
+/// - close the status panel first (its focus-loss dismissal can race the
+///   window ordering),
+/// - `.moveToActiveSpace` so the window follows you to the CURRENT Space
+///   (without it, on multi-Space/yabai setups "nothing happens" because the
+///   window surfaces on another Space),
+/// - `orderFrontRegardless` + deminiaturize as belt-and-braces.
 @MainActor
 func openMainWindow(_ openWindow: OpenWindowAction) {
     func mainWindow() -> NSWindow? {
         NSApp.windows.first { $0.identifier?.rawValue == "main" }
     }
+
+    func surface(_ label: String) {
+        guard let win = mainWindow() else {
+            openLog("\(label): main window not found")
+            return
+        }
+        win.collectionBehavior.insert(.moveToActiveSpace)
+        if win.isMiniaturized { win.deminiaturize(nil) }
+        win.makeKeyAndOrderFront(nil)
+        win.orderFrontRegardless()
+        openLog("\(label): visible=\(win.isVisible) key=\(win.isKeyWindow) miniaturized=\(win.isMiniaturized) screen=\(win.screen != nil)")
+    }
+
+    openLog("clicked; windows=\(NSApp.windows.map { "\($0.identifier?.rawValue ?? type(of: $0).description())/vis=\($0.isVisible)" })")
+
+    // Dismiss the menu-bar panel before touching window order.
+    if let key = NSApp.keyWindow, key.identifier?.rawValue != "main" { key.close() }
+
     if mainWindow() == nil { openWindow(id: "main") }
     NSApp.activate(ignoringOtherApps: true)
-    mainWindow()?.makeKeyAndOrderFront(nil)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-        mainWindow()?.makeKeyAndOrderFront(nil)
+    surface("immediate")
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
         NSApp.activate(ignoringOtherApps: true)
+        surface("delayed")
+    }
+}
+
+/// Append-only diagnostics for the Open flow — tiny, and invaluable when a
+/// window-manager setup (Spaces, yabai) swallows the window.
+private func openLog(_ line: String) {
+    let ts = ISO8601DateFormatter().string(from: Date())
+    let msg = "[\(ts)] \(line)\n"
+    let path = "/tmp/token-wise-open.log"
+    if let handle = FileHandle(forWritingAtPath: path) {
+        handle.seekToEndOfFile()
+        handle.write(Data(msg.utf8))
+        try? handle.close()
+    } else {
+        try? msg.write(toFile: path, atomically: true, encoding: .utf8)
     }
 }
 
