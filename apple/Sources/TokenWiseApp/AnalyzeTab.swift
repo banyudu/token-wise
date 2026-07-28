@@ -6,6 +6,10 @@ import TokenWiseCore
 struct AnalyzeTab: View {
     @EnvironmentObject var model: AppModel
     @State private var engine: AIEngine?
+    /// Fix ids the user ticked, for copy / apply.
+    @State private var selected: Set<Int> = []
+    /// Transient feedback from a copy or launch.
+    @State private var note: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -46,11 +50,18 @@ struct AnalyzeTab: View {
                 if let error = model.analysisError {
                     Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
                 } else if let report = model.analysisReport {
+                    let document = AnalysisDocument(report)
                     ScrollView {
-                        Text(markdown(report))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(4)
+                        AnalysisReportView(document: document, selected: $selected) { fix in
+                            FixApplier.copy([fix])
+                            flash("Copied fix \(fix.number)")
+                        }
+                        .padding(4)
+                    }
+                    .onChange(of: report) { _, _ in selected.removeAll() }
+
+                    if !document.fixes.isEmpty {
+                        actionBar(for: document.fixes.filter { selected.contains($0.id) })
                     }
                 } else if model.analyzing {
                     Text("Asking \(engine?.rawValue ?? "the model") to analyze your usage… this usually takes 20–90 seconds.")
@@ -65,7 +76,142 @@ struct AnalyzeTab: View {
         .padding(20)
     }
 
-    private func markdown(_ text: String) -> AttributedString {
+    private func actionBar(for fixes: [AnalysisFix]) -> some View {
+        HStack(spacing: 10) {
+            if fixes.isEmpty {
+                Text("Tick the fixes you want to act on.")
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                Text("\(fixes.count) selected").font(.callout).foregroundStyle(.secondary)
+                Button("Clear") { selected.removeAll() }
+                    .buttonStyle(.link)
+            }
+
+            if let note {
+                Label(note, systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+
+            Button {
+                FixApplier.copy(fixes)
+                flash(fixes.count == 1 ? "Copied 1 fix" : "Copied \(fixes.count) fixes")
+            } label: {
+                Label("Copy \(fixes.count)", systemImage: "doc.on.doc")
+            }
+            .disabled(fixes.isEmpty)
+
+            Button {
+                do {
+                    try FixApplier.launchClaude(with: fixes)
+                    flash("Opened a Claude session in your home directory")
+                } catch {
+                    note = error.localizedDescription
+                }
+            } label: {
+                Label("Apply \(fixes.count) with Claude", systemImage: "sparkles")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(fixes.isEmpty || !FixApplier.canApply)
+            .help(FixApplier.canApply
+                  ? "Opens an interactive claude session seeded with these fixes — it proposes the edits, you approve them"
+                  : "Requires the `claude` CLI")
+        }
+        .padding(.horizontal, 8).padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    /// Transient status line for copy/launch feedback.
+    private func flash(_ message: String) {
+        note = message
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if note == message { note = nil }
+        }
+    }
+
+}
+
+// MARK: - Report rendering
+
+/// Renders a parsed analysis report: headings as headings, and each numbered
+/// fix as a row the user can tick or copy on its own.
+struct AnalysisReportView: View {
+    let document: AnalysisDocument
+    @Binding var selected: Set<Int>
+    var onCopy: (AnalysisFix) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(document.blocks) { block($0) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func block(_ block: AnalysisDocument.Block) -> some View {
+        switch block {
+        case let .heading(_, level, text):
+            Text(text)
+                .font(level <= 2 ? .title3.bold() : .headline)
+                .padding(.top, 8)
+        case let .fix(fix):
+            fixRow(fix)
+        case let .bullet(_, markdown):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("•").foregroundStyle(.secondary)
+                Text(Self.inline(markdown)).textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 6)
+        case let .paragraph(_, markdown):
+            Text(Self.inline(markdown))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func fixRow(_ fix: AnalysisFix) -> some View {
+        let isSelected = selected.contains(fix.id)
+        return HStack(alignment: .top, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { isSelected },
+                set: { on in toggle(fix.id, on: on) }
+            )) {
+                EmptyView()
+            }
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .accessibilityLabel("Select fix \(fix.number): \(fix.title)")
+
+            Text("\(fix.number).")
+                .font(.body.monospacedDigit().bold())
+                .foregroundStyle(.secondary)
+
+            Text(Self.inline(fix.markdown))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button { onCopy(fix) } label: { Image(systemName: "doc.on.doc") }
+                .buttonStyle(.borderless)
+                .help("Copy this fix as a prompt")
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        // No row-wide tap target: the body text is selectable, and a gesture
+        // over it would fight click-drag selection.
+        .background(isSelected ? Color.accentColor.opacity(0.10) : .clear,
+                    in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func toggle(_ id: Int, on: Bool) {
+        if on { selected.insert(id) } else { selected.remove(id) }
+    }
+
+    /// Bold, code spans and emphasis inside one block. Block structure is
+    /// already handled by `AnalysisDocument`.
+    static func inline(_ text: String) -> AttributedString {
         (try? AttributedString(
             markdown: text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
