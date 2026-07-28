@@ -239,7 +239,7 @@ struct OverviewTab: View {
                                         .frame(width: 200, alignment: .leading)
                                     Text(s.title ?? "—").lineLimit(1).foregroundStyle(.secondary)
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                    sourceBadge(s.source)
+                                    sourceBadge(s.source, model: s.model)
                                     Text(Format.percent(s.cacheHitRate)).monospacedDigit()
                                         .foregroundStyle(.secondary).frame(width: 60, alignment: .trailing)
                                     Text(Format.cost(s.estimatedCostUsd)).monospacedDigit().bold()
@@ -388,7 +388,7 @@ struct SessionsTab: View {
                 .width(80)
                 TableColumn("Source") { s in
                     HStack(spacing: 5) {
-                        sourceBadge(s.source)
+                        sourceBadge(s.source, model: s.model)
                         if let model = displayModel(s.model) {
                             Text(model).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }

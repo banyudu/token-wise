@@ -47,7 +47,7 @@ struct SessionDetailView: View {
             Text(Format.path(summary.project)).font(.title2.bold())
             HStack(spacing: 10) {
                 Text(summary.gitBranch ?? "no branch")
-                sourceBadge(summary.source)
+                sourceBadge(summary.source, model: summary.model)
                 if let model = displayModel(summary.model) {
                     Text(model).font(.caption)
                         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -85,13 +85,8 @@ struct SessionDetailView: View {
     }
 }
 
-func sourceBadge(_ source: String) -> some View {
-    Text(source.uppercased())
-        .font(.caption2.bold())
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(source == "claude" ? CostColors.primary.opacity(0.15) : CostColors.input.opacity(0.15),
-                    in: RoundedRectangle(cornerRadius: 4))
-        .foregroundStyle(source == "claude" ? CostColors.primary : CostColors.input)
+func sourceBadge(_ source: String, model: String? = nil) -> some View {
+    BrandBadge(mark: .resolve(source: source, model: model))
 }
 
 // MARK: - Content analysis
