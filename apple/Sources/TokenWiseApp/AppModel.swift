@@ -100,7 +100,7 @@ final class AppModel: ObservableObject {
     }
 
     private func applyFilters() {
-        var result = filterByDateRange(allSessions)
+        var result = clipToDateRange(allSessions)
         switch sourceFilter {
         case .all: break
         case .claude: result = result.filter { $0.source == "claude" }
@@ -113,57 +113,59 @@ final class AppModel: ObservableObject {
         overview = TokenWise.buildOverview(result)
     }
 
-    private func filterByDateRange(_ sessions: [SessionSummary]) -> [SessionSummary] {
+    /// The local days the active range covers, or nil for "All Time".
+    ///
+    /// Ranges are whole local days because that is the granularity the per-day
+    /// attribution maps carry — "7 Days" means today plus the six before it.
+    private var daysInRange: Set<String>? {
         let cal = Calendar.current
         let now = Date()
-        let interval: DateInterval?
+        func days(from start: Date, count: Int) -> Set<String> {
+            Set((0..<count).compactMap { offset in
+                cal.date(byAdding: .day, value: offset, to: start).map(Format.localDay(of:))
+            })
+        }
         switch dateRange {
         case .all:
-            interval = nil
+            return nil
         case .today:
-            let start = cal.startOfDay(for: now)
-            interval = DateInterval(start: start, duration: 86_400)
+            return [Format.localDay(of: now)]
         case .yesterday:
-            let start = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: now))!
-            interval = DateInterval(start: start, duration: 86_400)
+            return [Format.localDay(of: cal.date(byAdding: .day, value: -1, to: now)!)]
         case .last7, .last30, .last90:
-            let days = dateRange == .last7 ? 7 : dateRange == .last30 ? 30 : 90
-            interval = DateInterval(start: cal.date(byAdding: .day, value: -days, to: now)!, end: now)
+            let count = dateRange == .last7 ? 7 : dateRange == .last30 ? 30 : 90
+            return days(from: cal.date(byAdding: .day, value: -(count - 1), to: cal.startOfDay(for: now))!,
+                        count: count)
         case .custom:
-            let start = cal.startOfDay(for: customFrom)
-            let end = cal.startOfDay(for: customTo).addingTimeInterval(86_400)
-            interval = DateInterval(start: min(start, end), end: max(start, end))
-        }
-        guard let interval else { return sessions }
-        return sessions.filter { s in
-            guard let d = Format.parseDate(s.firstTimestamp) else { return false }
-            return interval.contains(d)
+            let from = cal.startOfDay(for: min(customFrom, customTo))
+            let to = cal.startOfDay(for: max(customFrom, customTo))
+            let span = (cal.dateComponents([.day], from: from, to: to).day ?? 0) + 1
+            return days(from: from, count: span)
         }
     }
 
+    /// Restricts each session to the active range, dropping those with no
+    /// activity in it, so a range total matches what the menu bar reports for
+    /// the same days instead of counting a long session's whole cost on the day
+    /// it began.
+    private func clipToDateRange(_ sessions: [SessionSummary]) -> [SessionSummary] {
+        guard let days = daysInRange else { return sessions }
+        return sessions.compactMap { $0.clipped(to: days) }
+    }
+
     /// Today's total cost in the user's local timezone — drives the menu bar.
-    /// Uses the per-day attribution map (only spend that actually happened
-    /// today), falling back to whole-session attribution for sources without
-    /// per-response timestamps (Codex).
+    /// Shares `SessionSummary.cost(on:)` with the window's range filter so the
+    /// two readouts can never drift apart.
     var todayCost: Double {
-        let today = Format.localDay(of: Date())
-        return allSessions.reduce(0.0) { sum, s in
-            if let daily = s.dailyCostUsd { return sum + (daily[today] ?? 0) }
-            guard Format.localDay(s.lastTimestamp) == today else { return sum }
-            return sum + s.estimatedCostUsd
-        }
+        let today: Set<String> = [Format.localDay(of: Date())]
+        return allSessions.reduce(0.0) { $0 + $1.cost(on: today) }
     }
 
     /// Tokens processed today (input + output + cache read/write), same
     /// attribution rules as `todayCost`.
     var todayTokens: UInt64 {
-        let today = Format.localDay(of: Date())
-        return allSessions.reduce(UInt64(0)) { sum, s in
-            if let daily = s.dailyTokens { return sum + (daily[today] ?? 0) }
-            guard Format.localDay(s.lastTimestamp) == today else { return sum }
-            return sum + s.totalInputTokens + s.totalOutputTokens
-                + s.totalCacheReadTokens + s.totalCacheWriteTokens
-        }
+        let today: Set<String> = [Format.localDay(of: Date())]
+        return allSessions.reduce(UInt64(0)) { $0 + $1.tokens(on: today) }
     }
 
     var totalCost: Double { allSessions.reduce(0.0) { $0 + $1.estimatedCostUsd } }

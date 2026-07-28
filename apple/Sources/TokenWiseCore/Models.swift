@@ -65,6 +65,16 @@ public struct CostBreakdown: Codable, Equatable {
         cacheReadCost += other.cacheReadCost
         totalCost += other.totalCost
     }
+
+    /// Takes a proportional slice, for showing the part of a session that falls
+    /// inside a date range.
+    public mutating func scale(by factor: Double) {
+        inputCost *= factor
+        outputCost *= factor
+        cacheWriteCost *= factor
+        cacheReadCost *= factor
+        totalCost *= factor
+    }
 }
 
 public struct SessionSummary: Codable, Identifiable, Hashable {
