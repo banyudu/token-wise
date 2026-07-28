@@ -62,12 +62,32 @@ public struct PricingResolution {
 /// by longest substring, then the Sonnet-class fallback.
 public final class PricingTable {
     private let explicit: [String: PricingInfo]
+    /// Sessions repeat the same handful of model names thousands of times, and
+    /// the built-in tables are hundreds of patterns wide — resolve each name
+    /// once. Locked because parsing runs across `concurrentPerform`.
+    private var memo: [String: PricingResolution] = [:]
+    private let memoLock = NSLock()
 
     public init(explicit: [String: PricingInfo] = [:]) {
         self.explicit = explicit
     }
 
     public func resolve(_ model: String) -> PricingResolution {
+        memoLock.lock()
+        if let hit = memo[model] {
+            memoLock.unlock()
+            return hit
+        }
+        memoLock.unlock()
+
+        let result = uncachedResolve(model)
+        memoLock.lock()
+        memo[model] = result
+        memoLock.unlock()
+        return result
+    }
+
+    private func uncachedResolve(_ model: String) -> PricingResolution {
         if model.isEmpty {
             return PricingResolution(info: .fallback, usedFallback: true)
         }
@@ -82,12 +102,44 @@ public final class PricingTable {
 
     public func info(_ model: String) -> PricingInfo { resolve(model).info }
 
-    // MARK: Built-in table
+    /// Deterministic digest of every rate this table can apply, including the
+    /// user's overrides. Cached session summaries store already-computed costs,
+    /// so they key on this and are dropped whenever a rate moves. FNV-1a rather
+    /// than `Hasher`, which is seeded per process and would invalidate the
+    /// cache on every launch.
+    public var fingerprint: String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        func mix(_ text: String) {
+            for byte in text.utf8 {
+                hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3
+            }
+        }
+        func mix(_ info: PricingInfo) {
+            mix("\(info.inputPerMTok)|\(info.cacheWritePerMTok)|\(info.cacheReadPerMTok)|\(info.outputPerMTok)")
+        }
+        for (name, info) in explicit.sorted(by: { $0.key < $1.key }) {
+            mix(name)
+            mix(info)
+        }
+        for entry in Self.curated + Self.generated {
+            mix(entry.0)
+            mix("\(entry.1)|\(entry.2)|\(entry.3)|\(entry.4)")
+        }
+        mix(PricingInfo.fallback)
+        return String(hash, radix: 36)
+    }
+
+    // MARK: Built-in tables
 
     // (pattern, input, cacheWrite, cacheRead, output). Matched by substring,
     // longest pattern wins, so `gpt-5-mini` beats `gpt-5` and dated suffixes
     // like `claude-sonnet-4-5-20250929` still resolve.
-    private static let table: [(String, Double, Double, Double, Double)] = [
+    //
+    // Hand-maintained entries: short aliases the vendors don't publish, models
+    // absent from OpenRouter, and deliberate divergences from it. Everything
+    // else comes from `generated` (scripts/generate-pricing.sh); at equal
+    // pattern length these win, so repeating a pattern here overrides it.
+    static let curated: [(String, Double, Double, Double, Double)] = [
         // Anthropic Claude — Opus 4.5 (Nov 2025) cut Opus to $5/$25;
         // later Opus generations keep that tier. cacheWrite here is the
         // 5m rate (1.25× input); 1h writes are priced via the ephemeral
@@ -108,11 +160,12 @@ public final class PricingTable {
         ("claude-mythos-5", 10.0, 12.50, 1.00, 50.0),
         ("fable-5", 10.0, 12.50, 1.00, 50.0),
         ("mythos-5", 10.0, 12.50, 1.00, 50.0),
-        ("claude-sonnet-5", 3.0, 3.75, 0.30, 15.0),
+        // Sonnet 5 came in under the long-standing $3/$15 Sonnet tier.
+        ("claude-sonnet-5", 2.0, 2.50, 0.20, 10.0),
         ("claude-sonnet-4-6", 3.0, 3.75, 0.30, 15.0),
         ("claude-sonnet-4-5", 3.0, 3.75, 0.30, 15.0),
         ("claude-sonnet", 3.0, 3.75, 0.30, 15.0),
-        ("sonnet-5", 3.0, 3.75, 0.30, 15.0),
+        ("sonnet-5", 2.0, 2.50, 0.20, 10.0),
         ("sonnet-4-6", 3.0, 3.75, 0.30, 15.0),
         ("sonnet-4-5", 3.0, 3.75, 0.30, 15.0),
         ("claude-haiku-4-5", 1.0, 1.25, 0.10, 5.0),
@@ -121,10 +174,20 @@ public final class PricingTable {
         // OpenAI / Codex (cacheWrite=0 — OpenAI bills cached_input directly)
         ("gpt-5-nano", 0.05, 0.0, 0.005, 0.40),
         ("gpt-5-mini", 0.25, 0.0, 0.025, 2.0),
-        ("gpt-5.6", 1.25, 0.0, 0.125, 10.0),
-        ("gpt-5.5", 1.25, 0.0, 0.125, 10.0),
-        ("gpt-5.4", 1.25, 0.0, 0.125, 10.0),
-        ("gpt-5.2", 1.25, 0.0, 0.125, 10.0),
+        // GPT-5.6 ships as three named tiers that are nowhere near each other
+        // in price, so each is listed; a bare `gpt-5.6` takes the Sol tier.
+        ("gpt-5.6-luna", 0.50, 0.0, 0.05, 3.0),
+        ("gpt-5.6-terra", 1.25, 0.0, 0.125, 7.50),
+        ("gpt-5.6-sol", 5.0, 0.0, 0.50, 30.0),
+        ("gpt-5.6", 5.0, 0.0, 0.50, 30.0),
+        ("gpt-5.5", 5.0, 0.0, 0.50, 30.0),
+        ("gpt-5.4-nano", 0.20, 0.0, 0.02, 1.25),
+        ("gpt-5.4-mini", 0.75, 0.0, 0.075, 4.50),
+        ("gpt-5.4", 2.50, 0.0, 0.25, 15.0),
+        // 5.2 and 5.3 share a tier, `-chat` / `-codex` / `-codex-spark` included.
+        ("gpt-5.3", 1.75, 0.0, 0.175, 14.0),
+        ("gpt-5.2", 1.75, 0.0, 0.175, 14.0),
+        ("gpt-5.1", 1.25, 0.0, 0.125, 10.0),
         ("gpt-5", 1.25, 0.0, 0.125, 10.0),
         ("gpt-4.1-mini", 0.40, 0.0, 0.10, 1.60),
         ("gpt-4.1-nano", 0.10, 0.0, 0.025, 0.40),
@@ -135,12 +198,26 @@ public final class PricingTable {
         ("o1", 15.0, 0.0, 7.50, 60.0),
         ("o3-mini", 1.10, 0.0, 0.55, 4.40),
         ("o3", 2.0, 0.0, 0.50, 8.0),
+        // Z.ai GLM — driven through Claude Code's Anthropic-compatible
+        // endpoint, so these sessions live under `~/.claude/projects` and
+        // arrive here as `source: claude`. Official z.ai list rates. GLM never
+        // reports `cache_creation_input_tokens`, so cacheWrite=0 like the
+        // OpenAI rows; reads are billed at the cached-input rate.
+        ("glm-5.2", 1.40, 0.0, 0.26, 4.40),
+        ("glm-4.7-flash", 0.0, 0.0, 0.0, 0.0),
+        ("glm-4.7", 0.60, 0.0, 0.11, 2.20),
+        ("glm-4.6", 0.60, 0.0, 0.11, 2.20),
+        ("glm-4.5-flash", 0.0, 0.0, 0.0, 0.0),
+        ("glm-4.5-air", 0.20, 0.0, 0.03, 1.10),
+        ("glm-4.5", 0.60, 0.0, 0.11, 2.20),
     ]
 
     static func builtin(_ model: String) -> PricingInfo? {
         let lower = model.lowercased()
         var best: (String, Double, Double, Double, Double)?
-        for entry in table where lower.contains(entry.0) {
+        // Curated first, so a generated entry only wins by being strictly more
+        // specific — never by tying with a deliberate override.
+        for entry in curated + generated where lower.contains(entry.0) {
             if let b = best, b.0.count >= entry.0.count { continue }
             best = entry
         }

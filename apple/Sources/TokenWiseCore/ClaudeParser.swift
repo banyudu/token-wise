@@ -151,7 +151,8 @@ public enum ClaudeParser {
         // Per-file disk cache: only re-parse sessions whose file changed. The
         // first run is cold (~seconds for thousands of files); every run after
         // reuses unchanged summaries, so `token-wise today` is near-instant.
-        let disk = force ? [:] : DiskCache.load("claude-sessions-v4")
+        let rates = pricing.fingerprint
+        let disk = force ? [:] : DiskCache.load("claude-sessions-v4", pricing: rates)
         var fresh = [DiskCache.Entry?](repeating: nil, count: files.count)
         fresh.withUnsafeMutableBufferPointer { buffer in
             DispatchQueue.concurrentPerform(iterations: files.count) { i in
@@ -173,7 +174,7 @@ public enum ClaudeParser {
             sessions.append(entry.summary)
         }
         sessions.sort { ($0.lastTimestamp ?? "") > ($1.lastTimestamp ?? "") }
-        DiskCache.save("claude-sessions-v4", byPath)
+        DiskCache.save("claude-sessions-v4", pricing: rates, byPath)
         cache.set(signature: signature, sessions: sessions)
         return sessions
     }

@@ -63,7 +63,8 @@ public enum CodexParser {
         }
         sqlite3_finalize(stmt)
 
-        let disk = force ? [:] : DiskCache.load("codex-sessions")
+        let rates = pricing.fingerprint
+        let disk = force ? [:] : DiskCache.load("codex-sessions", pricing: rates)
         var out = [DiskCache.Entry?](repeating: nil, count: rows.count)
         out.withUnsafeMutableBufferPointer { buffer in
             DispatchQueue.concurrentPerform(iterations: rows.count) { i in
@@ -85,7 +86,7 @@ public enum CodexParser {
             byId[entry.summary.sessionId] = entry
             sessions.append(entry.summary)
         }
-        DiskCache.save("codex-sessions", byId)
+        DiskCache.save("codex-sessions", pricing: rates, byId)
         cache.set(signature: sig, sessions: sessions)
         return sessions
     }

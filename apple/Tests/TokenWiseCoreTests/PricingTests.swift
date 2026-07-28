@@ -54,6 +54,97 @@ final class PricingTests: XCTestCase {
         XCTAssertEqual(table.resolve("gpt-5").info.inputPerMTok, 1.25)
     }
 
+    func testGLMPricedAtZaiRatesNotSonnetFallback() {
+        // GLM runs through Claude Code, so these sessions used to land on the
+        // Sonnet-class fallback and read ~2× their real cost.
+        let r = table.resolve("glm-5.2")
+        XCTAssertFalse(r.usedFallback)
+        XCTAssertEqual(r.info.inputPerMTok, 1.40)
+        XCTAssertEqual(r.info.cacheReadPerMTok, 0.26)
+        XCTAssertEqual(r.info.outputPerMTok, 4.40)
+        XCTAssertEqual(r.info.cacheWritePerMTok, 0.0)
+
+        let older = table.resolve("glm-4.7")
+        XCTAssertFalse(older.usedFallback)
+        XCTAssertEqual(older.info.inputPerMTok, 0.60)
+        XCTAssertEqual(older.info.outputPerMTok, 2.20)
+    }
+
+    func testGLMFlashIsFree() {
+        // The Flash tiers are free, and must beat the `glm-4.7` prefix.
+        let r = table.resolve("glm-4.7-flash")
+        XCTAssertFalse(r.usedFallback)
+        XCTAssertEqual(r.info.outputPerMTok, 0.0)
+        XCTAssertEqual(table.resolve("glm-4.5-air").info.inputPerMTok, 0.20)
+    }
+
+    func testCodexSparkResolvesToCodexTier() {
+        // gpt-5.3-codex-spark must not settle for the plain gpt-5 rate.
+        let r = table.resolve("gpt-5.3-codex-spark")
+        XCTAssertFalse(r.usedFallback)
+        XCTAssertEqual(r.info.inputPerMTok, 1.75)
+        XCTAssertEqual(r.info.outputPerMTok, 14.0)
+    }
+
+    func testCurrentGPTTiersAreNotAllGPT5Rates() {
+        // Regression: 5.2/5.4/5.5 each moved off the $1.25/$10 gpt-5 tier, and
+        // the substring table silently priced them there.
+        XCTAssertEqual(table.resolve("gpt-5.5").info.inputPerMTok, 5.0)
+        XCTAssertEqual(table.resolve("gpt-5.5").info.outputPerMTok, 30.0)
+        XCTAssertEqual(table.resolve("gpt-5.4").info.inputPerMTok, 2.50)
+        XCTAssertEqual(table.resolve("gpt-5.2").info.outputPerMTok, 14.0)
+        XCTAssertEqual(table.resolve("gpt-5").info.inputPerMTok, 1.25)
+    }
+
+    func testGPT56VariantsPriceSeparately() {
+        // Luna is 10× cheaper than Sol — the shared `gpt-5.6` prefix must not
+        // flatten them together.
+        XCTAssertEqual(table.resolve("gpt-5.6-luna").info.inputPerMTok, 0.50)
+        XCTAssertEqual(table.resolve("gpt-5.6-luna").info.outputPerMTok, 3.0)
+        XCTAssertEqual(table.resolve("gpt-5.6-terra").info.outputPerMTok, 7.50)
+        XCTAssertEqual(table.resolve("gpt-5.6-sol").info.inputPerMTok, 5.0)
+    }
+
+    func testSonnetFiveIsCheaperThanTheLegacySonnetTier() {
+        let r = table.resolve("claude-sonnet-5")
+        XCTAssertFalse(r.usedFallback)
+        XCTAssertEqual(r.info.inputPerMTok, 2.0)
+        XCTAssertEqual(r.info.cacheWritePerMTok, 2.50)
+        XCTAssertEqual(r.info.cacheReadPerMTok, 0.20)
+        XCTAssertEqual(r.info.outputPerMTok, 10.0)
+        // Sonnet 4.6 and earlier stay at $3/$15.
+        XCTAssertEqual(table.resolve("claude-sonnet-4-6").info.inputPerMTok, 3.0)
+    }
+
+    func testGeneratedTableCoversOtherVendors() {
+        // Models the generated OpenRouter table brings in — none of these have
+        // a curated entry.
+        for model in ["gemini-3.1-pro-preview", "deepseek-chat", "minimax-m2.5",
+                      "kimi-k2-thinking", "grok-4.5", "qwen3-max"] {
+            let r = table.resolve(model)
+            XCTAssertFalse(r.usedFallback, "\(model) should be priced")
+            XCTAssertGreaterThan(r.info.outputPerMTok, 0, "\(model) needs an output rate")
+        }
+    }
+
+    func testCuratedOverridesGeneratedAtEqualSpecificity() {
+        // GLM is billed through z.ai directly, not an OpenRouter reseller, so
+        // the curated z.ai list rate must win over the generated row.
+        XCTAssertEqual(table.resolve("glm-5.2").info.inputPerMTok, 1.40)
+        // A strictly more specific generated pattern still wins over a short
+        // curated catch-all: `claude-opus` alone is the legacy $15/$75 tier.
+        XCTAssertEqual(table.resolve("claude-opus-4-5").info.inputPerMTok, 5.0)
+        XCTAssertEqual(table.resolve("claude-opus-4-1-20250805").info.inputPerMTok, 15.0)
+    }
+
+    func testFingerprintTracksBothTables() {
+        // The disk cache keys on this; a stable digest across a rate change
+        // would leave stale costs on screen.
+        XCTAssertFalse(PricingTable().fingerprint.isEmpty)
+        let overridden = PricingTable(explicit: ["glm-5.2": PricingInfo(input: 9, cacheWrite: 9, cacheRead: 9, output: 9)])
+        XCTAssertNotEqual(PricingTable().fingerprint, overridden.fingerprint)
+    }
+
     func testUnknownModelUsesFallbackAndIsFlagged() {
         let r = table.resolve("some-brand-new-model-x9")
         XCTAssertTrue(r.usedFallback)
