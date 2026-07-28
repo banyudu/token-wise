@@ -4,7 +4,7 @@
 <dict>
     <!-- Developer ID / direct-distribution build: NOT sandboxed, so the app has
          normal user-file access (reads ~/.claude and ~/.codex directly).
-         Hardened runtime is enabled automatically by Tauri for notarization. -->
+         Hardened runtime is enabled automatically for notarization. -->
     <key>com.apple.security.network.client</key>
     <true/>
 </dict>

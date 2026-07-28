@@ -6,11 +6,9 @@
 #
 # Secrets stored here:
 #   - APPLE_API_ISSUER                    App Store Connect API issuer UUID
-#   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD  password for the updater signing key
 #
 # Not stored here (already on disk / derivable):
 #   - the App Store Connect .p8 key (~/.appstoreconnect/private_keys/AuthKey_*.p8)
-#   - the updater private key (~/.tauri/token-wise.key)
 #   - signing-identity names (in your Keychain certs)
 set -euo pipefail
 
@@ -36,5 +34,4 @@ store() {
 
 echo "Storing token-wise release secrets in Keychain (service: ${SERVICE})"
 store "APPLE_API_ISSUER" "App Store Connect API Issuer ID (UUID)"
-store "TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "Tauri updater key password"
-echo "Done. You can now run 'pnpm release'."
+echo "Done. You can now run 'scripts/release-all.sh'."

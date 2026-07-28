@@ -4,8 +4,8 @@
 # notarized DMG published to public object storage (assets.banyudu.com,
 # via the local S3 mount).
 #
-# The Swift app has no in-app updater (the Tauri updater feed is retired), so
-# this publishes a versioned DMG + a stable `latest-dmg.json` pointer that the
+# The Swift app has no in-app updater, so this publishes a versioned DMG + a
+# stable `latest-dmg.json` pointer that the
 # website / users can link to.
 #
 # Run after scripts/build-swift-app.sh dev (release-all.sh does both).
@@ -20,7 +20,7 @@ BASE_URL="${TOKENWISE_UPDATER_BASE_URL:-https://assets.banyudu.com/token-wise}"
 S3_ASSETS_DIR="${TOKENWISE_S3_ASSETS_DIR:-$HOME/Library/CloudStorage/S3-S3/assets}"
 DEST_ROOT="${S3_ASSETS_DIR}/token-wise"
 
-VERSION="$(jq -r .version package.json)"
+VERSION="$(tr -d '[:space:]' < VERSION)"
 TAG="v${VERSION}"
 
 APP="dist-swift/token-wise.app"
