@@ -43,9 +43,19 @@ enum FixApplier {
     }
 
     static func copy(_ fixes: [AnalysisFix]) {
+        copyText(prompt(for: fixes))
+    }
+
+    /// Copy the complete model response, preserving all headings, paragraphs,
+    /// bullets, and fixes for use in another editor or conversation.
+    static func copyReport(_ report: String) {
+        copyText(report)
+    }
+
+    private static func copyText(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(prompt(for: fixes), forType: .string)
+        pasteboard.setString(text, forType: .string)
     }
 
     /// Opens an interactive `claude` session seeded with the selected fixes.

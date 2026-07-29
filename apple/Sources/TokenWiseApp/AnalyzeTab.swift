@@ -52,13 +52,18 @@ struct AnalyzeTab: View {
                 } else if let report = model.analysisReport {
                     let document = AnalysisDocument(report)
                     ScrollView {
-                        AnalysisReportView(document: document, selected: $selected) { fix in
+                        AnalysisReportView(document: document, selected: $selected,
+                                           onCopy: { fix in
                             FixApplier.copy([fix])
                             flash("Copied fix \(fix.number)")
-                        }
+                        }, onApply: { fix in
+                            apply([fix])
+                        })
                         .padding(4)
                     }
                     .onChange(of: report) { _, _ in selected.removeAll() }
+
+                    reportActionBar(report: report)
 
                     if !document.fixes.isEmpty {
                         actionBar(for: document.fixes.filter { selected.contains($0.id) })
@@ -122,6 +127,29 @@ struct AnalyzeTab: View {
         .overlay(alignment: .top) { Divider() }
     }
 
+    private func reportActionBar(report: String) -> some View {
+        HStack {
+            Button {
+                FixApplier.copyReport(report)
+                flash("Copied the complete analysis")
+            } label: {
+                Label("Copy all", systemImage: "doc.on.doc")
+            }
+            .help("Copy the complete analysis report as Markdown")
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+    }
+
+    private func apply(_ fixes: [AnalysisFix]) {
+        do {
+            try FixApplier.launchClaude(with: fixes)
+            flash(fixes.count == 1 ? "Opened fix in Claude" : "Opened fixes in Claude")
+        } catch {
+            note = error.localizedDescription
+        }
+    }
+
     /// Transient status line for copy/launch feedback.
     private func flash(_ message: String) {
         note = message
@@ -141,12 +169,14 @@ struct AnalysisReportView: View {
     let document: AnalysisDocument
     @Binding var selected: Set<Int>
     var onCopy: (AnalysisFix) -> Void
+    var onApply: (AnalysisFix) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(document.blocks) { block($0) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
     }
 
     @ViewBuilder
@@ -193,9 +223,20 @@ struct AnalysisReportView: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button { onCopy(fix) } label: { Image(systemName: "doc.on.doc") }
+            Button { onCopy(fix) } label: {
+                Label("Copy prompt", systemImage: "doc.on.doc")
+            }
                 .buttonStyle(.borderless)
                 .help("Copy this fix as a prompt")
+
+            Button { onApply(fix) } label: {
+                Label("Apply", systemImage: "sparkles")
+            }
+                .buttonStyle(.borderless)
+                .disabled(!FixApplier.canApply)
+                .help(FixApplier.canApply
+                      ? "Open Claude with this fix as an interactive prompt"
+                      : "Requires the `claude` CLI")
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
