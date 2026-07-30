@@ -1,7 +1,7 @@
 # Token Wise (Swift)
 
 Native macOS rewrite of Token Wise — a local, private cost & token-usage
-dashboard for **Claude Code** and **Codex**. Pure Swift, no Rust/React/Tauri.
+dashboard for **Claude Code** and **Codex**. Pure Swift and SwiftUI.
 
 It reads your `~/.claude` session transcripts and `~/.codex` history directly on
 your machine (nothing is uploaded) and shows where your tokens and dollars go,

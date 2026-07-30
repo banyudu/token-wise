@@ -15,14 +15,12 @@ one bundle) with the channel's entitlements:
 - `apple/Resources/Entitlements.dev.plist` — no sandbox, hardened runtime.
 - `apple/Resources/Entitlements.appstore.plist` — App Sandbox +
   `application-identifier`; the bundle also embeds
-  `src-tauri/embedded.provisionprofile`. Folder access at runtime goes through
+  `apple/Resources/embedded.provisionprofile`. Folder access at runtime goes through
   the in-app grant flow (security-scoped bookmarks).
 
-> The Swift app has **no in-app auto-updater** (the Tauri updater is retired).
+> The Swift app has no in-app auto-updater.
 > The dev channel publishes a versioned DMG plus a stable
-> `token-wise/latest-dmg.json` pointer. The old Tauri updater feed
-> (`token-wise/latest.json`) is left untouched, so previously-installed Tauri
-> builds simply stay on the last Tauri version.
+> `token-wise/latest-dmg.json` pointer.
 
 Bump the version once and you can ship the **same** version to both: dev-build
 users download the new DMG; App Store users get it after review.
@@ -32,9 +30,9 @@ users download the new DMG; App Store users get it after review.
 ## One-command release (local)
 
 ```bash
-pnpm release            # both channels
-pnpm release:appstore   # App Store only
-pnpm release:dev        # dev channel only
+scripts/release-all.sh            # both channels
+scripts/release-all.sh appstore   # App Store only
+scripts/release-all.sh dev        # dev channel only
 ```
 
 `scripts/release-all.sh` loads secrets from the Keychain, then:
@@ -52,11 +50,11 @@ pnpm release:dev        # dev channel only
 > `TOKENWISE_S3_ASSETS_DIR` / `TOKENWISE_UPDATER_BASE_URL` if either changes.
 
 Bump the version first so both channels match (the Swift bundle reads its
-version from `package.json`):
+version from `VERSION`):
 
 ```bash
-pnpm version <new-version>
-pnpm release
+echo 0.2.0 > VERSION
+scripts/release-all.sh
 ```
 
 ---
@@ -72,7 +70,7 @@ Rust toolchain (just Xcode + `jq`).
 session so it can read the login Keychain for code signing.
 
 ```bash
-pnpm release:runner     # downloads, registers, and starts the runner
+scripts/setup-runner.sh     # downloads, registers, and starts the runner
 ```
 
 To keep it running across logins, install it as a per-user LaunchAgent instead
@@ -107,7 +105,7 @@ Used for both notarization (`notarytool`, dev channel) and the `.pkg` upload
 ### 2. Store secrets in the Keychain
 
 ```bash
-pnpm release:secrets
+scripts/setup-release-secrets.sh
 ```
 
 Prompts for and stores (service `token-wise-release`, login Keychain):
@@ -116,9 +114,7 @@ Prompts for and stores (service `token-wise-release`, login Keychain):
   Access → Integrations → App Store Connect API)
 
 Nothing is written to disk in plaintext. `scripts/load-release-env.sh` reads
-these at build time; any value can be overridden by a pre-set env var. (The
-legacy Tauri updater key entries are still read if present, but no longer
-required.)
+these at build time; any value can be overridden by a pre-set env var.
 
 ### Required signing identities (in your login Keychain)
 
@@ -130,9 +126,3 @@ Identities can be overridden per run with `APPSTORE_SIGNING_IDENTITY` /
 `DEV_SIGNING_IDENTITY`.
 
 ---
-
-## Legacy Tauri pipeline
-
-The old Tauri build commands remain in `package.json` as `tauri:*` scripts and
-the updater keypair docs live in git history, but the release scripts and the
-workflow no longer use them.

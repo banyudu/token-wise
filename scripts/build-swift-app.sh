@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CHANNEL="${1:-dev}"
-VERSION="$(jq -r .version package.json)"
+VERSION="$(tr -d '[:space:]' < VERSION)"
 OUT_DIR="dist-swift"
 APP="$OUT_DIR/token-wise.app"
 
@@ -37,12 +37,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 sed "s/APP_VERSION/$VERSION/g" apple/Resources/Info.plist > "$APP/Contents/Info.plist"
 cp apple/.build/release/TokenWiseApp "$APP/Contents/MacOS/TokenWiseApp"
 cp apple/.build/release/token-wise "$APP/Contents/MacOS/token-wise"
-cp src-tauri/icons/icon.icns "$APP/Contents/Resources/icon.icns"
+cp apple/Resources/icon.icns "$APP/Contents/Resources/icon.icns"
 
 # Mac App Store builds must embed the distribution provisioning profile
 # (pairs with the application-identifier entitlement).
 if [[ "$CHANNEL" == "appstore" ]]; then
-  cp src-tauri/embedded.provisionprofile "$APP/Contents/embedded.provisionprofile"
+  cp apple/Resources/embedded.provisionprofile "$APP/Contents/embedded.provisionprofile"
 fi
 
 IDENTITY="${APPLE_SIGNING_IDENTITY:-}"

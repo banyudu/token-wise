@@ -2,8 +2,7 @@ import AppKit
 import SwiftUI
 import TokenWiseCore
 
-/// Folder-grant onboarding for sandboxed (App Store) builds — the SwiftUI
-/// port of the React `OnboardingScreen` + `grant_folder` command.
+/// Folder-grant onboarding for sandboxed (App Store) builds.
 enum GrantPicker {
     /// The user's *real* home (not the sandbox container), for pre-navigating
     /// the picker into the expected dotfolder.

@@ -2,7 +2,7 @@ import SwiftUI
 import TokenWiseCore
 
 /// Native Settings window (⌘,): folder re-grants (sandboxed builds) + CLI
-/// install to PATH. Port of the React `SettingsDialog` + Rust `path_install.rs`.
+/// install to PATH.
 enum CliInstall {
     static var linkURL: URL {
         GrantPicker.realHome.appendingPathComponent(".local/bin/token-wise")
