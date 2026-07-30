@@ -108,6 +108,7 @@ export default function Home() {
             <a href="#analyze" className="hover:text-foreground transition-colors">AI Analyze</a>
             <a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a>
             <a href="#models" className="hover:text-foreground transition-colors">Models</a>
+            <a href="https://github.com/banyudu/token-wise" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">GitHub</a>
           </div>
           <a
             href="https://apps.apple.com/us/app/token-wise/id6760606980?mt=12"
@@ -164,6 +165,17 @@ export default function Home() {
               Learn more
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3" />
+              </svg>
+            </a>
+            <a
+              href="https://github.com/banyudu/token-wise/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-neutral-600 dark:text-neutral-400 hover:text-foreground font-medium px-8 py-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-600 transition-colors"
+            >
+              Download from GitHub
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 .5a11.5 11.5 0 00-3.64 22.41c.58.11.79-.25.79-.56v-2.18c-3.21.7-3.89-1.55-3.89-1.55-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.17 1.18a10.98 10.98 0 015.76 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.26 5.69.41.35.78 1.04.78 2.1v3.11c0 .31.21.67.8.56A11.5 11.5 0 0012 .5z" />
               </svg>
             </a>
           </div>
@@ -491,7 +503,10 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-6">
             <a href="https://github.com/banyudu/token-wise" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">
-              GitHub
+              Source on GitHub
+            </a>
+            <a href="https://github.com/banyudu/token-wise/releases/latest" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">
+              Releases
             </a>
           </div>
         </div>

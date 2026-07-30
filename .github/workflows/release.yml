@@ -33,3 +33,18 @@ jobs:
         env:
           CHANNEL: ${{ inputs.channel }}
         run: scripts/release-all.sh "$CHANNEL"
+
+      # Keep GitHub Releases as the public source for signed direct-download
+      # builds. The dev release script also publishes the same DMG to S3 for
+      # the stable updater URL.
+      - name: Publish GitHub Release
+        if: inputs.channel == 'both' || inputs.channel == 'dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          gh release create "v${VERSION}" \
+            "dist-swift/token-wise_${VERSION}_universal.dmg" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Token Wise v${VERSION}" \
+            --generate-notes
