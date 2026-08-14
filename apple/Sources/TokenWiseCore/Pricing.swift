@@ -176,8 +176,8 @@ public final class PricingTable {
         ("gpt-5-mini", 0.25, 0.0, 0.025, 2.0),
         // GPT-5.6 ships as three named tiers that are nowhere near each other
         // in price, so each is listed; a bare `gpt-5.6` takes the Sol tier.
-        ("gpt-5.6-luna", 0.50, 0.0, 0.05, 3.0),
-        ("gpt-5.6-terra", 1.25, 0.0, 0.125, 7.50),
+        ("gpt-5.6-luna", 0.10, 0.0, 0.01, 0.60),
+        ("gpt-5.6-terra", 1.00, 0.0, 0.10, 6.00),
         ("gpt-5.6-sol", 5.0, 0.0, 0.50, 30.0),
         ("gpt-5.6", 5.0, 0.0, 0.50, 30.0),
         ("gpt-5.5", 5.0, 0.0, 0.50, 30.0),

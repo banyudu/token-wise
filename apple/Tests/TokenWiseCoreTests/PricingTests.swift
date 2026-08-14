@@ -97,11 +97,14 @@ final class PricingTests: XCTestCase {
     }
 
     func testGPT56VariantsPriceSeparately() {
-        // Luna is 10× cheaper than Sol — the shared `gpt-5.6` prefix must not
+        // Luna is 50× cheaper than Sol — the shared `gpt-5.6` prefix must not
         // flatten them together.
-        XCTAssertEqual(table.resolve("gpt-5.6-luna").info.inputPerMTok, 0.50)
-        XCTAssertEqual(table.resolve("gpt-5.6-luna").info.outputPerMTok, 3.0)
-        XCTAssertEqual(table.resolve("gpt-5.6-terra").info.outputPerMTok, 7.50)
+        XCTAssertEqual(table.resolve("gpt-5.6-luna").info.inputPerMTok, 0.10)
+        XCTAssertEqual(table.resolve("gpt-5.6-luna").info.cacheReadPerMTok, 0.01)
+        XCTAssertEqual(table.resolve("gpt-5.6-luna").info.outputPerMTok, 0.60)
+        XCTAssertEqual(table.resolve("gpt-5.6-terra").info.inputPerMTok, 1.0)
+        XCTAssertEqual(table.resolve("gpt-5.6-terra").info.cacheReadPerMTok, 0.10)
+        XCTAssertEqual(table.resolve("gpt-5.6-terra").info.outputPerMTok, 6.0)
         XCTAssertEqual(table.resolve("gpt-5.6-sol").info.inputPerMTok, 5.0)
     }
 
