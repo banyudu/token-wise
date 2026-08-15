@@ -23,8 +23,8 @@ enum GrantPicker {
         panel.allowsMultipleSelection = false
         panel.showsHiddenFiles = true
         panel.prompt = "Grant Access"
-        panel.message = "Select your \(kind.homeSubdir) folder to let Token Wise read your usage data."
-        panel.directoryURL = realHome.appendingPathComponent(kind.homeSubdir, isDirectory: true)
+        panel.message = "Select your \(kind.homeRelativePath) folder to let Token Wise read your usage data."
+        panel.directoryURL = realHome.appendingPathComponent(kind.homeRelativePath, isDirectory: true)
 
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         try Grants.persist(url, for: kind)
@@ -45,7 +45,8 @@ struct OnboardingView: View {
 
     private var folders: [Folder] {
         [Folder(kind: .claude, desc: "Claude Code session transcripts & pricing", granted: model.grants.claude),
-         Folder(kind: .codex, desc: "Codex usage logs", granted: model.grants.codex)]
+         Folder(kind: .codex, desc: "Codex usage logs", granted: model.grants.codex),
+         Folder(kind: .opencode, desc: "OpenCode sessions and token usage", granted: model.grants.opencode)]
     }
 
     var body: some View {
@@ -57,7 +58,7 @@ struct OnboardingView: View {
             ForEach(folders) { f in
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(f.kind.homeSubdir).font(.system(.body, design: .monospaced)).bold()
+                        Text(f.kind.homeRelativePath).font(.system(.body, design: .monospaced)).bold()
                         Text(f.desc).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()

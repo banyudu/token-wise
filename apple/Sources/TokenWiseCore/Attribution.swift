@@ -3,8 +3,9 @@ import Foundation
 /// Which local days a session's spend belongs to.
 ///
 /// Claude sessions carry a per-response timestamp, so a session that ran across
-/// midnight is split across the days it actually ran. Codex rollouts have no
-/// per-response data, so the whole session lands on the day it ended.
+/// midnight is split across the days it actually ran. OpenCode sessions use
+/// their assistant-message timestamps too. Codex rollouts have no per-response
+/// data, so the whole session lands on the day it ended.
 ///
 /// Every surface that reports a date range goes through these — the menu bar's
 /// "today" and the window's range filter used to disagree because each had its

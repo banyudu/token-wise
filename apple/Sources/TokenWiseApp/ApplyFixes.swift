@@ -34,7 +34,7 @@ enum FixApplier {
             .joined(separator: "\n\n")
         let plural = fixes.count == 1 ? "this cost fix" : "these \(fixes.count) cost fixes"
         return """
-        Token Wise analyzed my Claude Code / Codex usage and suggested \(plural). \
+        Token Wise analyzed my Claude Code / Codex / OpenCode usage and suggested \(plural). \
         Apply them to my setup, and tell me anything you can't do or disagree with \
         instead of guessing.
 

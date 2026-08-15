@@ -1,7 +1,7 @@
 import Foundation
 
 /// Filesystem locations and project-path helpers. Non-sandboxed builds read
-/// `~/.claude` and `~/.codex` directly; App Store (sandboxed) builds go
+/// `~/.claude`, `~/.codex`, and OpenCode's `~/.local/share/opencode` directly; App Store (sandboxed) builds go
 /// through the security-scoped bookmarks in `Grants`.
 public enum Paths {
     public static var home: URL {
@@ -19,6 +19,11 @@ public enum Paths {
 
     public static var codexRoot: URL? {
         guard let url = Grants.root(for: .codex) else { return nil }
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    public static var opencodeRoot: URL? {
+        guard let url = Grants.root(for: .opencode) else { return nil }
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 

@@ -1,10 +1,11 @@
 import Foundation
 
-/// Top-level facade: loads Claude + Codex sessions and builds aggregates.
+/// Top-level facade: loads Claude, Codex, and OpenCode sessions and builds aggregates.
 public enum TokenWise {
     public static func loadAllSessions(pricing: PricingTable, force: Bool = false) -> [SessionSummary] {
         var sessions = ClaudeParser.loadSessions(pricing: pricing, force: force)
         sessions.append(contentsOf: CodexParser.loadSessions(pricing: pricing, force: force))
+        sessions.append(contentsOf: OpencodeParser.loadSessions(pricing: pricing, force: force))
         return sessions
     }
 
