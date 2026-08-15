@@ -126,9 +126,9 @@ public enum AIAnalyzer {
             .map { "  - \($0.key): \(Format.cost($0.value))" }.joined(separator: "\n")
 
         return """
-        You are a cost-optimization analyst for AI coding-agent usage (Claude Code and Codex). \
+        You are a cost-optimization analyst for AI coding-agent usage (Claude Code, Codex, and OpenCode). \
         Below is a factual summary of the user's own usage, computed locally from their \
-        `~/.claude` transcripts and `~/.codex` history. Analyze it and respond in GitHub-flavored \
+        `~/.claude` transcripts, `~/.codex` history, and `~/.local/share/opencode` history. Analyze it and respond in GitHub-flavored \
         Markdown with EXACTLY these two sections and nothing else before them:
 
         ## Actionable fixes

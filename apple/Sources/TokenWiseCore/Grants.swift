@@ -4,8 +4,8 @@ import Foundation
 /// `grants.rs` + Objective-C FFI shim, now pure Foundation.
 ///
 /// Apple rejects `temporary-exception.files.home-relative-path` (guideline
-/// 2.4.5(i)), so a Mac App Store build can't read `~/.claude` or `~/.codex`
-/// directly. The user grants access once via a folder picker (in the app
+/// 2.4.5(i)), so a Mac App Store build can't read these dotfolders directly.
+/// The user grants access once via a folder picker (in the app
 /// layer); we persist a **security-scoped bookmark** so the grant survives
 /// relaunches, and resolve it on demand while the app reads.
 ///
@@ -15,11 +15,20 @@ import Foundation
 public enum GrantKind: String, CaseIterable {
     case claude
     case codex
+    case opencode
 
     public var homeSubdir: String {
         switch self {
         case .claude: return ".claude"
         case .codex: return ".codex"
+        case .opencode: return "opencode"
+        }
+    }
+
+    public var homeRelativePath: String {
+        switch self {
+        case .opencode: return ".local/share/opencode"
+        default: return homeSubdir
         }
     }
 
@@ -34,6 +43,7 @@ public struct GrantStatus {
     public var sandboxed: Bool
     public var claude: Bool
     public var codex: Bool
+    public var opencode: Bool
 }
 
 public enum GrantError: LocalizedError {
@@ -72,18 +82,19 @@ public enum Grants {
     private static var heldURLs: [GrantKind: URL] = [:]
 
     public static func status() -> GrantStatus {
-        guard isSandboxed else { return GrantStatus(sandboxed: false, claude: true, codex: true) }
+        guard isSandboxed else { return GrantStatus(sandboxed: false, claude: true, codex: true, opencode: true) }
         // Resolving here also primes the security scope early as a side effect.
         return GrantStatus(sandboxed: true,
                            claude: root(for: .claude) != nil,
-                           codex: root(for: .codex) != nil)
+                           codex: root(for: .codex) != nil,
+                           opencode: root(for: .opencode) != nil)
     }
 
-    /// The readable root for a kind: `~/.claude`/`~/.codex` directly when not
+    /// The readable root for a kind directly when not
     /// sandboxed, the granted bookmark path when sandboxed (nil = not granted).
     public static func root(for kind: GrantKind) -> URL? {
         guard isSandboxed else {
-            return Paths.home.appendingPathComponent(kind.homeSubdir, isDirectory: true)
+            return Paths.home.appendingPathComponent(kind.homeRelativePath, isDirectory: true)
         }
         lock.lock(); defer { lock.unlock() }
         if let cached = cachedRoots[kind] { return cached }

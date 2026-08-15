@@ -4,13 +4,14 @@ import SwiftUI
 
 /// The vendor behind a session, used to draw a logo instead of a text label.
 ///
-/// Sessions are grouped by the CLI that wrote them (`claude` / `codex`), but a
+/// Sessions are grouped by the CLI that wrote them, but a
 /// Claude Code session can be driven by a non-Anthropic model — GLM speaks the
 /// Anthropic-compatible API and lands in `~/.claude/projects` — so the model
 /// name decides the mark whenever it names a different vendor.
 enum BrandMark: Equatable {
     case claude
     case openAI
+    case opencode
     /// Vendors without a logo we can ship fall back to a short wordmark.
     case wordmark(String, Color)
 
@@ -19,13 +20,18 @@ enum BrandMark: Equatable {
         if m.hasPrefix("glm") { return .wordmark("GLM", CostColors.cacheRead) }
         if m.hasPrefix("gpt") || m.hasPrefix("o1") || m.hasPrefix("o3") { return .openAI }
         if m.hasPrefix("claude") { return .claude }
-        return source.lowercased() == "codex" ? .openAI : .claude
+        switch source.lowercased() {
+        case "codex": return .openAI
+        case "opencode": return .opencode
+        default: return .claude
+        }
     }
 
     var label: String {
         switch self {
         case .claude: return "Claude"
         case .openAI: return "OpenAI"
+        case .opencode: return "OpenCode"
         case .wordmark(let text, _): return text
         }
     }
@@ -34,6 +40,7 @@ enum BrandMark: Equatable {
         switch self {
         case .claude: return BrandColors.claude
         case .openAI: return .primary
+        case .opencode: return .blue
         case .wordmark(_, let color): return color
         }
     }
@@ -42,7 +49,7 @@ enum BrandMark: Equatable {
         switch self {
         case .claude: return BrandPaths.claude
         case .openAI: return BrandPaths.openAI
-        case .wordmark: return nil
+        case .opencode, .wordmark: return nil
         }
     }
 }

@@ -18,6 +18,7 @@ enum SourceFilter: String, CaseIterable, Identifiable {
     case all = "All"
     case claude = "Claude"
     case codex = "Codex"
+    case opencode = "OpenCode"
 
     var id: String { rawValue }
 }
@@ -77,7 +78,7 @@ final class AppModel: ObservableObject {
     }
 
     var needsOnboarding: Bool {
-        grants.sandboxed && !(grants.claude && grants.codex)
+        grants.sandboxed && !(grants.claude && grants.codex && grants.opencode)
     }
 
     func refreshGrants() {
@@ -105,6 +106,7 @@ final class AppModel: ObservableObject {
         case .all: break
         case .claude: result = result.filter { $0.source == "claude" }
         case .codex: result = result.filter { $0.source == "codex" }
+        case .opencode: result = result.filter { $0.source == "opencode" }
         }
         if let project = projectFilter {
             result = result.filter { $0.project == project }

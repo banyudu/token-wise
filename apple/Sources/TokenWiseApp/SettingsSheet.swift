@@ -55,6 +55,9 @@ struct SettingsPane: View {
                     LabeledContent(".codex") {
                         grantButton(.codex, granted: model.grants.codex)
                     }
+                    LabeledContent(".local/share/opencode") {
+                        grantButton(.opencode, granted: model.grants.opencode)
+                    }
                 } header: {
                     Text("Data folder access")
                 } footer: {
